@@ -1,0 +1,42 @@
+[0.051s] Invoking command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/src/ttt_bringup -DCMAKE_INSTALL_PREFIX=/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup
+[0.712s] -- The C compiler identification is GNU 11.4.0
+[1.204s] -- The CXX compiler identification is GNU 11.4.0
+[1.237s] -- Detecting C compiler ABI info
+[1.436s] -- Detecting C compiler ABI info - done
+[1.467s] -- Check for working C compiler: /usr/bin/cc - skipped
+[1.469s] -- Detecting C compile features
+[1.471s] -- Detecting C compile features - done
+[1.498s] -- Detecting CXX compiler ABI info
+[1.694s] -- Detecting CXX compiler ABI info - done
+[1.722s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[1.724s] -- Detecting CXX compile features
+[1.724s] -- Detecting CXX compile features - done
+[1.733s] -- Found ament_cmake: 1.3.12 (/opt/ros/humble/share/ament_cmake/cmake)
+[3.072s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[3.383s] -- Found ament_lint_auto: 0.12.14 (/opt/ros/humble/share/ament_lint_auto/cmake)
+[3.599s] -- Added test 'lint_cmake' to check CMake code style
+[3.601s] -- Added test 'xmllint' to check XML markup files
+[3.605s] -- Configuring done
+[3.614s] -- Generating done
+[3.618s] -- Build files have been written to: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup
+[3.641s] Invoked command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/src/ttt_bringup -DCMAKE_INSTALL_PREFIX=/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup
+[3.647s] Invoking command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup -- -j6 -l6
+[3.754s] Invoked command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup -- -j6 -l6
+[3.781s] Invoking command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup
+[3.801s] -- Install configuration: ""
+[3.802s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ament_index/resource_index/package_run_dependencies/ttt_bringup
+[3.803s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ament_index/resource_index/parent_prefix_path/ttt_bringup
+[3.804s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/environment/ament_prefix_path.sh
+[3.804s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/environment/ament_prefix_path.dsv
+[3.805s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/environment/path.sh
+[3.805s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/environment/path.dsv
+[3.806s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/local_setup.bash
+[3.806s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/local_setup.sh
+[3.807s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/local_setup.zsh
+[3.807s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/local_setup.dsv
+[3.808s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/package.dsv
+[3.808s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ament_index/resource_index/packages/ttt_bringup
+[3.809s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/cmake/ttt_bringupConfig.cmake
+[3.809s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/cmake/ttt_bringupConfig-version.cmake
+[3.810s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_bringup/share/ttt_bringup/package.xml
+[3.820s] Invoked command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_bringup

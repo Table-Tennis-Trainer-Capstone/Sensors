@@ -1,0 +1,16 @@
+# ROS2 build artifacts
+tabletennistrainer_ws/build/
+tabletennistrainer_ws/install/
+tabletennistrainer_ws/og/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Storel

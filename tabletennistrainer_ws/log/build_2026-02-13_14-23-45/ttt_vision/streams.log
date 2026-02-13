@@ -1,0 +1,59 @@
+[0.045s] Invoking command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/src/ttt_vision -DCMAKE_INSTALL_PREFIX=/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision
+[3.599s] -- The C compiler identification is GNU 11.4.0
+[3.599s] -- The CXX compiler identification is GNU 11.4.0
+[3.599s] -- Detecting C compiler ABI info
+[3.599s] -- Detecting C compiler ABI info - done
+[3.599s] -- Check for working C compiler: /usr/bin/cc - skipped
+[3.600s] -- Detecting C compile features
+[3.600s] -- Detecting C compile features - done
+[3.600s] -- Detecting CXX compiler ABI info
+[3.600s] -- Detecting CXX compiler ABI info - done
+[3.600s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[3.600s] -- Detecting CXX compile features
+[3.600s] -- Detecting CXX compile features - done
+[3.600s] -- Found ament_cmake: 1.3.12 (/opt/ros/humble/share/ament_cmake/cmake)
+[3.601s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[3.601s] -- Found rclcpp: 16.0.17 (/opt/ros/humble/share/rclcpp/cmake)
+[3.601s] -- Found rosidl_generator_c: 3.1.8 (/opt/ros/humble/share/rosidl_generator_c/cmake)
+[3.601s] -- Found rosidl_adapter: 3.1.8 (/opt/ros/humble/share/rosidl_adapter/cmake)
+[3.601s] -- Found rosidl_generator_cpp: 3.1.8 (/opt/ros/humble/share/rosidl_generator_cpp/cmake)
+[3.601s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[3.601s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[3.641s] -- Found rmw_implementation_cmake: 6.1.2 (/opt/ros/humble/share/rmw_implementation_cmake/cmake)
+[3.646s] -- Found rmw_fastrtps_cpp: 6.2.9 (/opt/ros/humble/share/rmw_fastrtps_cpp/cmake)
+[3.830s] -- Found OpenSSL: /usr/lib/aarch64-linux-gnu/libcrypto.so (found version "3.0.2")  
+[3.895s] -- Found FastRTPS: /opt/ros/humble/include  
+[3.998s] -- Using RMW implementation 'rmw_fastrtps_cpp' as default
+[4.015s] -- Looking for pthread.h
+[4.197s] -- Looking for pthread.h - found
+[4.197s] -- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+[4.385s] -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+[4.388s] -- Found Threads: TRUE  
+[4.515s] -- Found sensor_msgs: 4.9.0 (/opt/ros/humble/share/sensor_msgs/cmake)
+[4.600s] -- Found ament_lint_auto: 0.12.14 (/opt/ros/humble/share/ament_lint_auto/cmake)
+[4.803s] -- Added test 'lint_cmake' to check CMake code style
+[4.805s] -- Added test 'xmllint' to check XML markup files
+[4.814s] -- Configuring done
+[4.826s] -- Generating done
+[4.829s] -- Build files have been written to: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision
+[4.877s] Invoked command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/src/ttt_vision -DCMAKE_INSTALL_PREFIX=/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision
+[4.882s] Invoking command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision -- -j6 -l6
+[4.982s] Invoked command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision -- -j6 -l6
+[4.985s] Invoking command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision
+[5.002s] -- Install configuration: ""
+[5.002s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ament_index/resource_index/package_run_dependencies/ttt_vision
+[5.003s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ament_index/resource_index/parent_prefix_path/ttt_vision
+[5.003s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/environment/ament_prefix_path.sh
+[5.004s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/environment/ament_prefix_path.dsv
+[5.004s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/environment/path.sh
+[5.004s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/environment/path.dsv
+[5.005s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/local_setup.bash
+[5.005s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/local_setup.sh
+[5.005s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/local_setup.zsh
+[5.005s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/local_setup.dsv
+[5.006s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/package.dsv
+[5.006s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ament_index/resource_index/packages/ttt_vision
+[5.007s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/cmake/ttt_visionConfig.cmake
+[5.007s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/cmake/ttt_visionConfig-version.cmake
+[5.007s] -- Installing: /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_vision/share/ttt_vision/package.xml
+[5.014s] Invoked command in '/home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/capstone-nano1/TTT-Capstone-Sensors/tabletennistrainer_ws/build/ttt_vision
