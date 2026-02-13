@@ -4,6 +4,7 @@ set -e
 if [ "$1" == "clean" ]; then
     echo "Cleaning workspace..."
     rm -rf build/ install/ log/
+    exit 0
 fi
 
 echo "Building Table Tennis Trainer Workspace..."
