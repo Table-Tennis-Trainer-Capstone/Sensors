@@ -2,7 +2,7 @@
 tabletennistrainer_ws/build/
 tabletennistrainer_ws/install/
 tabletennistrainer_ws/og/
-
+tabletennistrainer_ws/log/
 # Python
 __pycache__/
 *.pyc
