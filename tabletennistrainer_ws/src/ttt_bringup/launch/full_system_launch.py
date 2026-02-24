@@ -7,16 +7,17 @@ import os
 
 def generate_launch_description():
     calibration_dir = get_package_share_directory('ttt_calibration')
+    bringup_dir = get_package_share_directory('ttt_bringup')
     
     return LaunchDescription([
-        # Launch calibration first
+        # Launch Calibration (TF transforms)
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(calibration_dir, 'launch', 'calibration.launch.py')
             )
         ),
         
-        # Left Camera
+        # Jetson A - Left Camera + Vision
         Node(
             package='ttt_camera',
             executable='camera_node',
@@ -31,8 +32,6 @@ def generate_launch_description():
             }],
             output='screen'
         ),
-        
-        # Left Vision
         Node(
             package='ttt_vision',
             executable='ball_detector_node',
@@ -46,5 +45,41 @@ def generate_launch_description():
                 'show_window': True
             }],
             output='screen'
-        )
+        ),
+        
+        # Jetson B - Right Camera + Vision 
+        # Node(
+        #     package='ttt_camera',
+        #     executable='camera_node',
+        #     name='camera_right',
+        #     parameters=[{
+        #         'device': '/dev/video1',  # Different camera
+        #         'camera_id': 'right',
+        #         'width': 640,
+        #         'height': 400,
+        #         'fps': 240,
+        #         'show_window': True
+        #     }],
+        #     output='screen'
+        # ),
+        
+        # 4. Future nodes (commented out for now)
+        # Node(
+        #     package='ttt_vision',
+        #     executable='stereo_fusion_node',
+        #     name='stereo_fusion',
+        #     output='screen'
+        # ),
+        # Node(
+        #     package='ttt_control',
+        #     executable='arm_controller_node',
+        #     name='arm_controller',
+        #     output='screen'
+        # ),
+        # Node(
+        #     package='ttt_hardware',
+        #     executable='stm32_bridge_node',
+        #     name='stm32_bridge',
+        #     output='screen'
+        # ),
     ])
