@@ -28,13 +28,13 @@ def generate_launch_description():
                 'width': 640,
                 'height': 400,
                 'fps': 240,
-                'show_window': True
+                'show_window': False
             }],
             output='screen'
         ),
         Node(
             package='ttt_vision',
-            executable='ball_detector_node',
+            executable='vision_node',
             name='ball_detector_left',
             parameters=[{
                 'camera_id': 'left',
@@ -58,7 +58,7 @@ def generate_launch_description():
         #         'width': 640,
         #         'height': 400,
         #         'fps': 240,
-        #         'show_window': True
+        #         'show_window': False
         #     }],
         #     output='screen'
         # ),

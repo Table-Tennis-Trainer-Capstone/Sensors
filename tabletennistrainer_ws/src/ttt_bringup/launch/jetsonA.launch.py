@@ -7,7 +7,7 @@ import os
 
 def generate_launch_description():
     calibration_dir = get_package_share_directory('ttt_calibration')
-    
+
     return LaunchDescription([
         # Launch calibration first
         IncludeLaunchDescription(
@@ -15,7 +15,7 @@ def generate_launch_description():
                 os.path.join(calibration_dir, 'launch', 'calibration.launch.py')
             )
         ),
-        
+
         # Left Camera
         Node(
             package='ttt_camera',
@@ -27,11 +27,10 @@ def generate_launch_description():
                 'width': 640,
                 'height': 400,
                 'fps': 240,
-                'show_window': False
             }],
             output='screen'
         ),
-        
+
         # Left Vision
         Node(
             package='ttt_vision',
@@ -42,9 +41,8 @@ def generate_launch_description():
                 'min_brightness': 200,
                 'min_radius': 5,
                 'max_radius': 50,
-                'blur_size': 5,
-                'show_window': True
+                'show_window': True,   # Draws detection overlay on screen
             }],
             output='screen'
-        )
+        ),
     ])

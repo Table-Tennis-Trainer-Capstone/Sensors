@@ -1,32 +1,27 @@
-# Stereo Camera Extrinsic Parameters
-# Cameras mounted at 45 degrees above table sides
-# Update these values with actual measurements
+/**:
+  ros__parameters:
+    camera_baseline: 1.5
 
-camera_baseline: 1.5  # Distance between cameras in meters (MEASURE THIS!)
+    left_camera:
+      x: -0.75
+      y: 0.0
+      z: 1.0
+      roll: 0.0
+      pitch: -0.785
+      yaw: 0.0
 
-# Left camera pose relative to table center
-left_camera:
-  x: -0.75      # Left side of table (meters)
-  y: 0.0        # Table center lengthwise
-  z: 1.0        # Height above table (meters)
-  roll: 0.0     # No roll (radians)
-  pitch: -0.785 # 45 degrees down (radians = -45 * π/180) - verify with level
-  yaw: 0.0      # Facing forward (radians)
+    right_camera:
+      x: 0.75
+      y: 0.0
+      z: 1.0
+      roll: 0.0
+      pitch: -0.785
+      yaw: 0.0
 
-# Right camera pose relative to table center  
-right_camera:
-  x: 0.75       # Right side of table (meters)
-  y: 0.0        # Table center lengthwise
-  z: 1.0        # Height above table (meters)
-  roll: 0.0     # No roll
-  pitch: -0.785 # 45 degrees down - verify with level
-  yaw: 0.0      # Facing forward
-
-# Robot arm base relative to table
-robot_base:
-  x: 0.0        # Table center
-  y: -1.0       # Behind table (your side)
-  z: 0.0        # Table height
-  roll: 0.0
-  pitch: 0.0
-  yaw: 0.0
+    robot_base:
+      x: 0.0
+      y: -1.0
+      z: 0.0
+      roll: 0.0
+      pitch: 0.0
+      yaw: 0.0
