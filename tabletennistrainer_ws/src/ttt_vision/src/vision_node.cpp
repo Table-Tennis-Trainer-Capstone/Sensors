@@ -97,18 +97,6 @@ private:
 
         detection_pub_->publish(detect_msg);
 
-        // Print detection result
-        if (detect_msg.x >= 0) {
-            RCLCPP_INFO(this->get_logger(),
-                "[%s] Ball detected | x: %.1f  y: %.1f  radius: %.1f  conf: %.2f",
-                camera_id_.c_str(), detect_msg.x, detect_msg.y,
-                detect_msg.radius, detect_msg.confidence);
-        }
-        else {
-            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                "[%s] No ball detected", camera_id_.c_str());
-        }
-
         // 6. Optional debug window (CPU only — no need to touch GPU for display)
         if (show_window_) {
             cv::Mat display;

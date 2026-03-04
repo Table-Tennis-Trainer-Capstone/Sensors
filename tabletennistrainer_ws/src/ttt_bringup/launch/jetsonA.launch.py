@@ -38,11 +38,39 @@ def generate_launch_description():
             name='ball_detector_left',
             parameters=[{
                 'camera_id': 'left',
-                'min_brightness': 200,
+                'min_brightness': 25,
                 'min_radius': 5,
                 'max_radius': 50,
                 'show_window': True,   # Draws detection overlay on screen
             }],
             output='screen'
         ),
+
+        # Stereo Vision
+#        Node (
+#            package='ttt_stereo',
+#            executable='stereo_node',
+#            parameters=[{
+#                'baseline_m': 1.5,
+#                'fx': 224.1,
+#                'fy': 200.0,
+#                'cx': 320.0,
+#                'cy': 200.0,
+#            }],
+#        ),
+#
+#        Node(
+#            package='ttt_trajectory',
+#            executable='trajectory_node',
+#            name='trajectory_node',
+#            parameters=[{
+#                'lookahead_ms': 250,
+#                'min_samples': 5,
+#                'max_samples': 20,
+#                'gravity': 9.81,
+#                'table_y': -0.5,    # tune this to your camera mount height
+#                'restitution': 0.85,
+#            }],
+#            output='screen'
+#        ),
     ])

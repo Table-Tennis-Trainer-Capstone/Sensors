@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ttt_stereo</name>
+  <version>0.0.1</version>
+  <description>Stereo triangulation node</description>
+  <maintainer email="you@example.com">your name</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>ttt_msgs</depend>
+  <depend>message_filters</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
