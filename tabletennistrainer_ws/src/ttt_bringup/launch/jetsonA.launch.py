@@ -38,7 +38,7 @@ def generate_launch_description():
             name='ball_detector_left',
             parameters=[{
                 'camera_id': 'left',
-                'min_brightness': 25,
+                'min_brightness': 10,
                 'min_radius': 5,
                 'max_radius': 50,
                 'show_window': True,   # Draws detection overlay on screen
@@ -59,18 +59,18 @@ def generate_launch_description():
            }],
        ),
 
-       Node(
-           package='ttt_trajectory',
-           executable='trajectory_node',
-           name='trajectory_node',
-           parameters=[{
-               'lookahead_ms': 250,
-               'min_samples': 5,
-               'max_samples': 20,
-               'gravity': 9.81,
-               'table_y': -0.5,    # tune this to your camera mount height
-               'restitution': 0.85,
-           }],
-           output='screen'
-       ),
+    #    Node(
+    #        package='ttt_trajectory',
+    #        executable='trajectory_node',
+    #        name='trajectory_node',
+    #        parameters=[{
+    #            'lookahead_ms': 250,
+    #            'min_samples': 5,
+    #            'max_samples': 20,
+    #            'gravity': 9.81,
+    #            'table_y': -0.5,    # tune this to your camera mount height
+    #            'restitution': 0.85,
+    #        }],
+    #        output='screen'
+    #    ),
     ])

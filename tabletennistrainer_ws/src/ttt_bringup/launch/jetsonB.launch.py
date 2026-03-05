@@ -39,7 +39,7 @@ def generate_launch_description():
             name='ball_detector_right',
             parameters=[{
                 'camera_id': 'right',
-                'min_brightness': 200,
+                'min_brightness': 25,
                 'min_radius': 5,
                 'max_radius': 50,
                 'blur_size': 5,
