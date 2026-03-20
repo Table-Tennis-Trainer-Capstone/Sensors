@@ -86,98 +86,124 @@ class SystemLauncher(QThread):
 
 
 class CalibrationWorker(QThread):
-    """Handles ArUco marker detection for calibration"""
+    """Runs ArUco detection in its own thread at ~10 fps.
+    process_frame submits frames; the thread stores the latest result for overlay."""
     status_signal = pyqtSignal(str)
-    
+
+    NAMES = {0: "Front-Left", 1: "Front-Right", 2: "Back-Right", 3: "Back-Left"}
+
     def __init__(self):
         super().__init__()
         self.running = True
-        
+        self._pending = {}        # side -> latest raw frame
+        self._lock = __import__('threading').Lock()
+        # last detection result per side: list of (corners_array, marker_id)
+        self.last_result = {'left': [], 'right': []}
+
+    def submit_frame(self, frame, side):
+        """Called from ROS thread — just stores the latest frame, non-blocking."""
+        with self._lock:
+            self._pending[side] = frame.copy()
+
     def run(self):
-        try:
-            # ArUco setup
-            self.dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-            self.parameters = cv2.aruco.DetectorParameters()
-            self.parameters.adaptiveThreshWinSizeMin = 3
-            self.parameters.adaptiveThreshWinSizeMax = 99
-            self.parameters.adaptiveThreshWinSizeStep = 2
-            self.parameters.adaptiveThreshConstant = 3
-            self.parameters.minMarkerPerimeterRate = 0.005
-            self.parameters.maxMarkerPerimeterRate = 4.0
-            self.parameters.polygonalApproxAccuracyRate = 0.15
-            self.parameters.maxErroneousBitsInBorderRate = 0.5
-            self.parameters.errorCorrectionRate = 0.6
-            self.parameters.minCornerDistanceRate = 0.01
-            self.parameters.minDistanceToBorder = 1
-            
-            # Marker positions on table (standard table tennis table)
-            self.marker_positions = {
-                0: (-0.7625, -1.37, 0.0),   # Front-left
-                1: (0.7625, -1.37, 0.0),    # Front-right
-                2: (0.7625, 1.37, 0.0),     # Back-right
-                3: (-0.7625, 1.37, 0.0),    # Back-left
-            }
-            
-            # Camera intrinsics (approximate)
-            self.camera_matrix = np.array([
-                [320.0, 0.0, 320.0],
-                [0.0, 320.0, 200.0],
-                [0.0, 0.0, 1.0]
-            ])
-            self.dist_coeffs = np.zeros((1, 5))
-            
-            self.status_signal.emit("Calibration mode ready")
-            
-        except Exception as e:
-            self.status_signal.emit(f"Calibration init error: {str(e)}")
-    
-    def detect_markers(self, frame):
-        """Detect ArUco markers and draw on frame"""
-        if frame is None or len(frame.shape) != 3:
-            return frame, []
-        
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Detect markers
-        corners, ids, rejected = cv2.aruco.detectMarkers(
-            gray, self.dictionary, parameters=self.parameters
-        )
-        
-        detected_ids = []
-        
-        if ids is not None:
-            # Draw detected markers
-            cv2.aruco.drawDetectedMarkers(frame, corners, ids)
-            
-            for i, marker_id in enumerate(ids.flatten()):
-                detected_ids.append(int(marker_id))
-                
-                # Get marker corners
-                corner = corners[i][0]
-                center = corner.mean(axis=0).astype(int)
-                
-                # Draw marker info
-                label = f"ID {marker_id}"
-                cv2.putText(frame, label, (center[0] - 30, center[1] - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                
-                # Draw marker name
-                if marker_id in [0, 1, 2, 3]:
-                    names = {0: "Front-Left", 1: "Front-Right", 
-                            2: "Back-Right", 3: "Back-Left"}
-                    cv2.putText(frame, names[marker_id], 
-                               (center[0] - 40, center[1] + 20),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-        
-        return frame, detected_ids
-    
+        dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+        params = cv2.aruco.DetectorParameters()
+        params.adaptiveThreshWinSizeMin = 3
+        params.adaptiveThreshWinSizeMax = 53
+        params.adaptiveThreshWinSizeStep = 4
+        params.adaptiveThreshConstant = 3
+        params.minMarkerPerimeterRate = 0.005
+        params.maxMarkerPerimeterRate = 4.0
+        params.polygonalApproxAccuracyRate = 0.15
+        params.maxErroneousBitsInBorderRate = 0.5
+        params.errorCorrectionRate = 0.6
+        params.minCornerDistanceRate = 0.01
+        params.minDistanceToBorder = 1
+
+        self.status_signal.emit("Calibration mode ready")
+
+        import time
+        while self.running:
+            with self._lock:
+                pending = dict(self._pending)
+                self._pending.clear()
+
+            for side, frame in pending.items():
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                corners, ids, _ = cv2.aruco.detectMarkers(gray, dictionary, parameters=params)
+                result = []
+                if ids is not None:
+                    for i, mid in enumerate(ids.flatten()):
+                        result.append((corners[i][0], int(mid)))
+                self.last_result[side] = result
+
+            total = sum(len(v) for v in self.last_result.values())
+            if total > 0:
+                self.status_signal.emit(f"Markers detected: {total}/4")
+
+            time.sleep(0.1)  # ~10 fps detection rate
+
+    def draw_overlay(self, frame, side):
+        """Draw cached detection result onto frame — called from ROS thread, fast."""
+        results = self.last_result.get(side, [])
+        count = 0
+        for corner, mid in results:
+            pts = corner.astype(int)
+            cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
+            center = pts.mean(axis=0).astype(int)
+            cv2.putText(frame, f"ID {mid}", (center[0]-30, center[1]-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            if mid in self.NAMES:
+                cv2.putText(frame, self.NAMES[mid], (center[0]-40, center[1]+20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            count += 1
+
+        status = f"Markers: {count}/4"
+        color = (0, 255, 0) if count >= 3 else (0, 165, 255)
+        cv2.putText(frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+        if count >= 3:
+            cv2.putText(frame, "Ready to calibrate!", (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        return frame
+
     def stop(self):
         self.running = False
+
+
+def draw_axis_indicator(frame):
+    """Draw XYZ axis arrows in the bottom-left corner of the frame."""
+    h, w = frame.shape[:2]
+    origin = (55, h - 55)
+    length = 40
+
+    # X = red  → right
+    # Y = green → up (height above table)
+    # Z = blue  → up-right diagonal (depth, into scene)
+    axes = [
+        ((length, 0),        (0, 0, 255),   'X'),   # X right  (BGR: red)
+        ((0, -length),       (0, 255, 0),   'Y'),   # Y up     (BGR: green)
+        ((length//2, -length//2), (255, 0, 0), 'Z'),# Z depth  (BGR: blue)
+    ]
+
+    # Semi-transparent background box
+    box_tl = (origin[0] - 15, origin[1] - length - 20)
+    box_br = (origin[0] + length + 20, origin[1] + 15)
+    overlay = frame.copy()
+    cv2.rectangle(overlay, box_tl, box_br, (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.4, frame, 0.6, 0, frame)
+
+    for (dx, dy), color, label in axes:
+        tip = (origin[0] + dx, origin[1] + dy)
+        cv2.arrowedLine(frame, origin, tip, color, 2, tipLength=0.3)
+        label_pos = (tip[0] + 4, tip[1] + 4)
+        cv2.putText(frame, label, label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
 
 class ROSWorker(QThread):
     image_signal = pyqtSignal(np.ndarray, str)
     coords_signal = pyqtSignal(float, float, float)
+    predicted_signal = pyqtSignal(float, float, float)
+    landing_signal = pyqtSignal(float, float)
 
     def __init__(self):
         super().__init__()
@@ -193,6 +219,8 @@ class ROSWorker(QThread):
         self.node.create_subscription(CompressedImage, '/camera/left/compressed', self.left_callback, qos)
         self.node.create_subscription(CompressedImage, '/camera/right/compressed', self.right_callback, qos)
         self.node.create_subscription(PointStamped, '/ball_position_3d', self.stereo_callback, qos)
+        self.node.create_subscription(PointStamped, '/ball_trajectory/predicted', self.predicted_callback, qos)
+        self.node.create_subscription(PointStamped, '/ball_trajectory/landing', self.landing_callback, qos)
         self.node.create_subscription(BallDetection, '/ball_detection/left', lambda m: self.detection_callback(m, 'left'), qos)
         self.node.create_subscription(BallDetection, '/ball_detection/right', lambda m: self.detection_callback(m, 'right'), qos)
 
@@ -201,6 +229,8 @@ class ROSWorker(QThread):
     def left_callback(self, msg): self.process_frame(msg, "left")
     def right_callback(self, msg): self.process_frame(msg, "right")
     def stereo_callback(self, msg): self.coords_signal.emit(msg.point.x, msg.point.y, msg.point.z)
+    def predicted_callback(self, msg): self.predicted_signal.emit(msg.point.x, msg.point.y, msg.point.z)
+    def landing_callback(self, msg): self.landing_signal.emit(msg.point.x, msg.point.z)
     def detection_callback(self, msg, side): self.latest_detection[side] = msg
 
     def process_frame(self, msg, side):
@@ -217,20 +247,10 @@ class ROSWorker(QThread):
 
             # Apply ArUco detection if in calibration mode
             if self.calibration_mode and self.calibration_worker:
-                frame, detected = self.calibration_worker.detect_markers(frame)
-                
-                # Draw status on frame
-                status_text = f"Markers: {len(detected)}/4 detected"
-                cv2.putText(frame, status_text, (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                
-                if len(detected) >= 3:
-                    cv2.putText(frame, "Ready to calibrate!", (10, 60),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                else:
-                    cv2.putText(frame, "Need 3+ markers", (10, 60),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+                self.calibration_worker.submit_frame(frame, side)   # non-blocking
+                self.calibration_worker.draw_overlay(frame, side)   # draws cached result
             
+            draw_axis_indicator(frame)
             self.image_signal.emit(frame, side)
     
     def enable_calibration(self):
@@ -262,6 +282,8 @@ class MartyDashboard(QWidget):
         self.worker = ROSWorker()
         self.worker.image_signal.connect(self.update_image)
         self.worker.coords_signal.connect(self.update_stats)
+        self.worker.predicted_signal.connect(self.update_predicted)
+        self.worker.landing_signal.connect(self.update_landing)
         self.worker.start()
 
     def init_ui(self):
@@ -334,16 +356,33 @@ class MartyDashboard(QWidget):
         data_frame = QFrame()
         data_frame.setStyleSheet("background-color: #1e1e1e; border-radius: 10px; border: 1px solid #333;")
         data_layout = QGridLayout(data_frame)
-        val_font = QFont("Consolas", 28, QFont.Bold)
+        val_font  = QFont("Consolas", 22, QFont.Bold)
+        pred_font = QFont("Consolas", 16)
 
         self.lbl_x = self.create_stat_label("X: 0.00", "#ff5555", val_font)
         self.lbl_y = self.create_stat_label("Y: 0.00", "#55ff55", val_font)
         self.lbl_z = self.create_stat_label("Z: 0.00", "#5555ff", val_font)
 
-        data_layout.addWidget(QLabel("3D BALL POSITION (METERS)"), 0, 0, 1, 3, Qt.AlignCenter)
-        data_layout.addWidget(self.lbl_x, 1, 0)
-        data_layout.addWidget(self.lbl_y, 1, 1)
-        data_layout.addWidget(self.lbl_z, 1, 2)
+        self.lbl_px = self.create_stat_label("pX: --", "#ff9999", pred_font)
+        self.lbl_py = self.create_stat_label("pY: --", "#99ff99", pred_font)
+        self.lbl_pz = self.create_stat_label("pZ: --", "#9999ff", pred_font)
+
+        self.lbl_land = self.create_stat_label("Landing: --", "#ffcc00", pred_font)
+
+        hdr_current = QLabel("CURRENT POSITION (m)")
+        hdr_current.setStyleSheet("color: #aaa; font-size: 11px;")
+        hdr_predicted = QLabel("PREDICTED +250ms (m)")
+        hdr_predicted.setStyleSheet("color: #aaa; font-size: 11px;")
+
+        data_layout.addWidget(hdr_current,  0, 0, 1, 3, Qt.AlignCenter)
+        data_layout.addWidget(self.lbl_x,   1, 0)
+        data_layout.addWidget(self.lbl_y,   1, 1)
+        data_layout.addWidget(self.lbl_z,   1, 2)
+        data_layout.addWidget(hdr_predicted, 2, 0, 1, 3, Qt.AlignCenter)
+        data_layout.addWidget(self.lbl_px,  3, 0)
+        data_layout.addWidget(self.lbl_py,  3, 1)
+        data_layout.addWidget(self.lbl_pz,  3, 2)
+        data_layout.addWidget(self.lbl_land, 4, 0, 1, 3, Qt.AlignCenter)
 
         main_layout.addWidget(data_frame)
         
@@ -399,6 +438,14 @@ class MartyDashboard(QWidget):
         self.lbl_x.setText(f"X: {x:.2f}")
         self.lbl_y.setText(f"Y: {y:.2f}")
         self.lbl_z.setText(f"Z: {z:.2f}")
+
+    def update_predicted(self, x, y, z):
+        self.lbl_px.setText(f"pX: {x:.2f}")
+        self.lbl_py.setText(f"pY: {y:.2f}")
+        self.lbl_pz.setText(f"pZ: {z:.2f}")
+
+    def update_landing(self, x, z):
+        self.lbl_land.setText(f"Landing  X: {x:.2f}  Z: {z:.2f}")
 
     def toggle_calibration(self):
         self.calibration_mode = self.calib_button.isChecked()
