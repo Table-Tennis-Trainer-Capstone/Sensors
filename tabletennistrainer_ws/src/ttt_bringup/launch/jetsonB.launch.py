@@ -41,7 +41,7 @@ def generate_launch_description():
                 'min_brightness': 10,
                 'min_radius': 5,
                 'max_radius': 50,
-                'show_window': True,   # Draws detection overlay on screen
+                'show_window': False,   # Draws detection overlay on screen
             }],
             output='screen'
         ),

@@ -1,15 +1,27 @@
 import sys
 import cv2
 import numpy as np
-import rclpy
 import subprocess
 import os
 import signal
 import time
+
+# Must be set before rclpy/DDS initializes
+os.environ.setdefault('ROS_DOMAIN_ID', '42')
+# Ensure workspace messages are findable
+import sys as _sys
+_ws_python = '/home/capstone-nano2/TTT-Capstone-Sensors/tabletennistrainer_ws/install/ttt_msgs/local/lib/python3.10/dist-packages'
+if _ws_python not in _sys.path:
+    _sys.path.insert(0, _ws_python)
+os.environ.setdefault('RMW_IMPLEMENTATION', 'rmw_cyclonedds_cpp')
+os.environ.setdefault('CYCLONEDDS_URI', 'file:///home/capstone-nano2/cyclonedds.xml')
+
+import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage
 from geometry_msgs.msg import PointStamped
+from ttt_msgs.msg import BallDetection
 from PyQt5.QtWidgets import (QApplication, QLabel, QWidget, QGridLayout, 
                              QVBoxLayout, QHBoxLayout, QFrame, QMessageBox, 
                              QPushButton, QTabWidget)
@@ -37,13 +49,16 @@ class SystemLauncher(QThread):
             subprocess.run(["v4l2-ctl", "-d", "/dev/video0", "-c", "exposure=800", "-c", "analogue_gain=1200"])
             
             self.status_signal.emit("Launching Jetson B (Local)...")
-            cmd_b = f"source /opt/ros/humble/setup.bash && source {LOCAL_WS}/install/setup.bash && ros2 launch ttt_bringup jetsonB.launch.py"
+            cmd_b = f"export ROS_DOMAIN_ID=42 && export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && export CYCLONEDDS_URI=file:///home/capstone-nano2/cyclonedds.xml && source /opt/ros/humble/setup.bash && source {LOCAL_WS}/install/setup.bash && ros2 launch ttt_bringup jetsonB.launch.py"
             proc_b = subprocess.Popen(cmd_b, shell=True, executable='/bin/bash', preexec_fn=os.setsid)
             self.processes.append(proc_b)
 
             self.status_signal.emit("Connecting to Jetson A (Remote)...")
             cmd_a = (f"ssh -tt {JETSON_A_USER}@{JETSON_A_IP} "
                      f"'v4l2-ctl -d /dev/video0 -c exposure=800 -c analogue_gain=1200; "
+                     f"export ROS_DOMAIN_ID=42; "
+                     f"export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; "
+                     f"export CYCLONEDDS_URI=file:///home/capstone-nano1/cyclonedds.xml; "
                      f"source /opt/ros/humble/setup.bash; source {REMOTE_WS}/install/setup.bash; "
                      f"ros2 launch ttt_bringup jetsonA.launch.py'")
             proc_a = subprocess.Popen(cmd_a, shell=True, preexec_fn=os.setsid)
@@ -79,6 +94,12 @@ class CalibrationWorker(QThread):
             # ArUco setup
             self.dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
             self.parameters = cv2.aruco.DetectorParameters()
+            self.parameters.adaptiveThreshWinSizeMin = 3
+            self.parameters.adaptiveThreshWinSizeMax = 53
+            self.parameters.adaptiveThreshWinSizeStep = 4
+            self.parameters.minMarkerPerimeterRate = 0.01
+            self.parameters.maxMarkerPerimeterRate = 4.0
+            self.parameters.polygonalApproxAccuracyRate = 0.1
             
             # Marker positions on table (standard table tennis table)
             self.marker_positions = {
@@ -158,22 +179,33 @@ class ROSWorker(QThread):
         if not rclpy.ok():
             rclpy.init()
         self.node = Node('marty_dashboard_node')
+        self.latest_detection = {'left': None, 'right': None}
         qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, depth=1)
         self.node.create_subscription(CompressedImage, '/camera/left/compressed', self.left_callback, qos)
         self.node.create_subscription(CompressedImage, '/camera/right/compressed', self.right_callback, qos)
         self.node.create_subscription(PointStamped, '/ball_position_3d', self.stereo_callback, qos)
-        
+        self.node.create_subscription(BallDetection, '/ball_detection/left', lambda m: self.detection_callback(m, 'left'), qos)
+        self.node.create_subscription(BallDetection, '/ball_detection/right', lambda m: self.detection_callback(m, 'right'), qos)
+
         rclpy.spin(self.node)
 
     def left_callback(self, msg): self.process_frame(msg, "left")
     def right_callback(self, msg): self.process_frame(msg, "right")
     def stereo_callback(self, msg): self.coords_signal.emit(msg.point.x, msg.point.y, msg.point.z)
+    def detection_callback(self, msg, side): self.latest_detection[side] = msg
 
     def process_frame(self, msg, side):
         np_arr = np.frombuffer(msg.data, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         
         if frame is not None:
+            # Draw ball detection overlay
+            det = self.latest_detection.get(side)
+            if det is not None and det.confidence > 0:
+                cx, cy, r = int(det.x), int(det.y), max(int(det.radius), 5)
+                cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
+                cv2.circle(frame, (cx, cy), 3, (0, 255, 0), -1)
+
             # Apply ArUco detection if in calibration mode
             if self.calibration_mode and self.calibration_worker:
                 frame, detected = self.calibration_worker.detect_markers(frame)
