@@ -46,7 +46,7 @@ class SystemLauncher(QThread):
     def run(self):
         try:
             self.status_signal.emit("Tuning Local V4L2 Settings (Jetson B)...")
-            subprocess.run(["v4l2-ctl", "-d", "/dev/video0", "-c", "exposure=800", "-c", "analogue_gain=1200"])
+            subprocess.run(["v4l2-ctl", "-d", "/dev/video0", "-c", "exposure=8000", "-c", "analogue_gain=1200"])
             
             self.status_signal.emit("Launching Jetson B (Local)...")
             cmd_b = f"export ROS_DOMAIN_ID=42 && export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && export CYCLONEDDS_URI=file:///home/capstone-nano2/cyclonedds.xml && source /opt/ros/humble/setup.bash && source {LOCAL_WS}/install/setup.bash && ros2 launch ttt_bringup jetsonB.launch.py"
@@ -238,12 +238,13 @@ class ROSWorker(QThread):
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         
         if frame is not None:
-            # Draw ball detection overlay
-            det = self.latest_detection.get(side)
-            if det is not None and det.confidence > 0:
-                cx, cy, r = int(det.x), int(det.y), max(int(det.radius), 5)
-                cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
-                cv2.circle(frame, (cx, cy), 3, (0, 255, 0), -1)
+            # Draw ball detection overlay (hidden in calibration mode)
+            if not self.calibration_mode:
+                det = self.latest_detection.get(side)
+                if det is not None and det.confidence > 0:
+                    cx, cy, r = int(det.x), int(det.y), max(int(det.radius), 5)
+                    cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
+                    cv2.circle(frame, (cx, cy), 3, (0, 255, 0), -1)
 
             # Apply ArUco detection if in calibration mode
             if self.calibration_mode and self.calibration_worker:

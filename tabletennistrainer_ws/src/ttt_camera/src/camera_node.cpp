@@ -14,12 +14,16 @@ public:
         this->declare_parameter("width", 640);
         this->declare_parameter("height", 480);
         this->declare_parameter("fps", 240);
+        this->declare_parameter("exposure", 800);
+        this->declare_parameter("analogue_gain", 1000);
 
         std::string device = this->get_parameter("device").as_string();
         camera_id_ = this->get_parameter("camera_id").as_string();
         int width = this->get_parameter("width").as_int();
         int height = this->get_parameter("height").as_int();
         int fps = this->get_parameter("fps").as_int();
+        int exposure = this->get_parameter("exposure").as_int();
+        int analogue_gain = this->get_parameter("analogue_gain").as_int();
 
         // GStreamer Pipeline:
         // 1. v4l2src pulls MJPEG from the OV9281
@@ -28,7 +32,8 @@ public:
 
         std::string pipeline =
             "v4l2src device=" + device + " io-mode=2 "
-            "extra-controls=\"s,exposure=800,analogue_gain=1000\" ! " // Matches your list
+            "extra-controls=\"s,exposure=" + std::to_string(exposure) +
+            ",analogue_gain=" + std::to_string(analogue_gain) + "\" ! "
             "video/x-raw, format=GRAY8, width=" + std::to_string(width) +
             ", height=" + std::to_string(height) +
             ", framerate=" + std::to_string(fps) + "/1 ! "

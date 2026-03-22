@@ -27,6 +27,8 @@ def generate_launch_description():
                 'width': 640,
                 'height': 400,
                 'fps': 240,
+                'exposure': 6000,
+                'analogue_gain': 8000,
             }],
             output='screen'
         ),
@@ -56,6 +58,7 @@ def generate_launch_description():
                'fy': 200.0,
                'cx': 320.0,
                'cy': 200.0,
+               'max_sync_age_ms': 100,
            }],
        ),
 

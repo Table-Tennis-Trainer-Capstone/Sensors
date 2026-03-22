@@ -27,6 +27,8 @@ def generate_launch_description():
                 'width': 640,
                 'height': 400,
                 'fps': 240,
+                'exposure': 3000,
+                'analogue_gain': 8000,
             }],
             output='screen'
         ),
@@ -38,7 +40,7 @@ def generate_launch_description():
             name='ball_detector_left',
             parameters=[{
                 'camera_id': 'left',
-                'min_brightness': 10,
+                'min_brightness': 5,
                 'min_radius': 5,
                 'max_radius': 50,
                 'show_window': False,   # Draws detection overlay on screen
