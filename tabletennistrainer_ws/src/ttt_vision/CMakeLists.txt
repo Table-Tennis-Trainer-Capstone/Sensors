@@ -13,7 +13,7 @@ find_package(cv_bridge REQUIRED)
 find_package(ttt_msgs REQUIRED)
 
 # Find OpenCV with CUDA components
-find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui videoio cudafilters cudaimgproc cudawarping)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui videoio cudafilters cudaimgproc cudawarping cudaarithm)
 
 add_executable(vision_node src/vision_node.cpp)
 

@@ -16,12 +16,12 @@
         </inertial>
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/67.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/67.stl" scale="1 1 1" /></geometry>
             <material name="gray" />
         </visual>
         <collision>
             <origin xyz="0 0 0" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/67.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/67.stl" scale="1 1 1" /></geometry>
         </collision>
     </link>
 
@@ -33,12 +33,12 @@
         </inertial>
         <visual>
             <origin xyz="0.0637 0.1917 0.0902" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/63.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/63.stl" scale="1 1 1" /></geometry>
             <material name="dark_gray" />
         </visual>
         <collision>
             <origin xyz="0.0637 0.1917 0.0902" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/63.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/63.stl" scale="1 1 1" /></geometry>
         </collision>
     </link>
 
@@ -50,12 +50,12 @@
         </inertial>
         <visual>
             <origin xyz="-0.0453 0.1279 0.0401" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/75.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/75.stl" scale="1 1 1" /></geometry>
             <material name="white" />
         </visual>
         <collision>
             <origin xyz="-0.0453 0.1279 0.0401" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/75.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/75.stl" scale="1 1 1" /></geometry>
         </collision>
     </link>
 
@@ -67,12 +67,12 @@
         </inertial>
         <visual>
             <origin xyz="0.0640 0.2460 -0.3971" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/79.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/79.stl" scale="1 1 1" /></geometry>
             <material name="black" />
         </visual>
         <collision>
             <origin xyz="0.0640 0.2460 -0.3971" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/79.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/79.stl" scale="1 1 1" /></geometry>
         </collision>
     </link>
 
@@ -84,12 +84,12 @@
         </inertial>
         <visual>
             <origin xyz="0.1232 0.3795 0.0397" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/59.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/59.stl" scale="1 1 1" /></geometry>
             <material name="light_blue" />
         </visual>
         <collision>
             <origin xyz="0.1232 0.3795 0.0397" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/59.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/59.stl" scale="1 1 1" /></geometry>
         </collision>
     </link>
 
@@ -101,12 +101,12 @@
         </inertial>
         <visual>
             <origin xyz="0.1494 0.3836 -0.0516" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/71.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/71.stl" scale="1 1 1" /></geometry>
             <material name="red" />
         </visual>
         <collision>
             <origin xyz="0.1494 0.3836 -0.0516" rpy="0 0 0" />
-            <geometry><mesh filename="package://mainarmass/meshes/71.stl" scale="1 1 1" /></geometry>
+            <geometry><mesh filename="package://ttt_control/meshes/71.stl" scale="1 1 1" /></geometry>
         </collision>
     </link>
 

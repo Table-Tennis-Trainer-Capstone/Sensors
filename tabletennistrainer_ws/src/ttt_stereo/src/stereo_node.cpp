@@ -79,8 +79,10 @@ private:
         }
 
         // ── Triangulation ─────────────────────────────────────────────────────
-        // disparity: horizontal pixel difference between left and right detection
-        double disparity = left->x - right->x;
+        // disparity: with cameras facing each other (one on each side of the table)
+        // the right camera's image is horizontally mirrored relative to the left,
+        // so use right->x - left->x to get a positive disparity for real objects.
+        double disparity = right->x - left->x;
 
         if (std::abs(disparity) < 1.0) {
             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 500,

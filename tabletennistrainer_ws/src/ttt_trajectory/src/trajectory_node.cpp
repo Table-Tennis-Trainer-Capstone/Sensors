@@ -16,12 +16,16 @@ public:
     TrajectoryNode() : Node("trajectory_node") {
 
         // ── Parameters ───────────────────────────────────────────────────────
-        this->declare_parameter("lookahead_ms",   250);   // how far ahead to predict
-        this->declare_parameter("min_samples",    5);     // minimum samples before predicting
-        this->declare_parameter("max_samples",    20);    // rolling buffer size
-        this->declare_parameter("gravity",        9.81);  // m/s²
-        this->declare_parameter("table_y",        0.0);   // Y coord of table surface (meters)
-        this->declare_parameter("restitution",    0.85);  // bounce energy retention (0-1)
+        this->declare_parameter("lookahead_ms",     200);
+        this->declare_parameter("min_samples",       4);
+        this->declare_parameter("max_samples",      10);
+        this->declare_parameter("gravity",          9.81);
+        this->declare_parameter("table_y",          0.0);   // Y of table in camera frame — measure after mounting
+        this->declare_parameter("restitution",      0.85);
+        this->declare_parameter("camera_tilt_deg",  0.0);   // positive = pitched down
+        //   0°  → camera level    → gravity only in Y
+        //   45° → 45° down tilt  → gravity split equally between Y and Z
+        //   90° → straight down  → gravity only in Z
 
         lookahead_ms_  = this->get_parameter("lookahead_ms").as_int();
         min_samples_   = this->get_parameter("min_samples").as_int();
@@ -30,20 +34,24 @@ public:
         table_y_       = this->get_parameter("table_y").as_double();
         restitution_   = this->get_parameter("restitution").as_double();
 
-        RCLCPP_INFO(this->get_logger(),
-            "Trajectory node | lookahead=%dms samples=%d-%d gravity=%.2f table_y=%.2f restitution=%.2f",
-            lookahead_ms_, min_samples_, max_samples_, gravity_, table_y_, restitution_);
+        double tilt_rad = this->get_parameter("camera_tilt_deg").as_double() * M_PI / 180.0;
+        gravity_y_ =  gravity_ * std::cos(tilt_rad);  // component along camera Y (down in image)
+        gravity_z_ =  gravity_ * std::sin(tilt_rad);  // component along camera Z (into scene)
 
-        // ── Subscriptions / Publishers ───────────────────────────────────────
+        RCLCPP_INFO(this->get_logger(),
+            "Trajectory node | lookahead=%dms samples=%d-%d "
+            "gravity=%.2f tilt=%.1f° → gy=%.2f gz=%.2f table_y=%.2f restitution=%.2f",
+            lookahead_ms_, min_samples_, max_samples_,
+            gravity_, this->get_parameter("camera_tilt_deg").as_double(),
+            gravity_y_, gravity_z_, table_y_, restitution_);
+
         position_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
             "/ball_position_3d", 10,
             std::bind(&TrajectoryNode::positionCallback, this, std::placeholders::_1));
 
-        // Predicted position at lookahead_ms in the future
         predicted_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
             "/ball_trajectory/predicted", 10);
 
-        // Bounce landing point (where ball will next hit the table)
         landing_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
             "/ball_trajectory/landing", 10);
     }
@@ -53,7 +61,6 @@ private:
 
         double t_abs = rclcpp::Time(msg->header.stamp).seconds();
 
-        // ── Maintain rolling buffer ───────────────────────────────────────────
         if (buffer_.empty()) t0_ = t_abs;
 
         Sample s;
@@ -70,45 +77,49 @@ private:
             return;
         }
 
-        // ── Fit physics model to buffer ───────────────────────────────────────
-        // Separate into time vector and position vectors
+        // Normalize timestamps so oldest = 0
         std::vector<double> ts, xs, ys, zs;
+        double t_offset = buffer_.front().t;
         for (const auto& b : buffer_) {
-            ts.push_back(b.t);
+            ts.push_back(b.t - t_offset);
             xs.push_back(b.x);
             ys.push_back(b.y);
             zs.push_back(b.z);
         }
 
-        // X and Z are linear:  pos = p0 + v*t
-        double vx, x0, vz, z0;
+        // X is always linear (horizontal, no gravity component)
+        double vx, x0;
         fitLinear(ts, xs, x0, vx);
-        fitLinear(ts, zs, z0, vz);
 
-        // Y is parabolic:  pos = y0 + vy*t - 0.5*g*t²
+        // Y: parabolic with gravity_y component
+        //    y(t) = y0 + vy*t - 0.5*gravity_y*t²
         double vy, y0;
-        fitParabolic(ts, ys, y0, vy);
+        fitParabolic(ts, ys, gravity_y_, y0, vy);
 
-        // ── Predict position at lookahead ─────────────────────────────────────
-        double t_now     = s.t;
-        double t_ahead   = t_now + (lookahead_ms_ / 1000.0);
+        // Z: parabolic with gravity_z component (non-zero when camera is tilted down)
+        //    z(t) = z0 + vz*t + 0.5*gravity_z*t²
+        //    (+ because tilted camera Z axis points forward-and-down, same direction as gravity)
+        double vz, z0;
+        fitParabolic(ts, zs, -gravity_z_, z0, vz);  // negative: subtract to get linear remainder
+
+        double t_now   = s.t - t_offset;
+        double t_ahead = t_now + (lookahead_ms_ / 1000.0);
 
         auto [px, py, pz, bounced] = predictWithBounce(x0, vx, y0, vy, z0, vz, t_now, t_ahead);
 
         auto predicted_msg = geometry_msgs::msg::PointStamped();
-        predicted_msg.header.stamp = msg->header.stamp;
+        predicted_msg.header.stamp    = msg->header.stamp;
         predicted_msg.header.frame_id = "camera_left_optical_frame";
         predicted_msg.point.x = px;
         predicted_msg.point.y = py;
         predicted_msg.point.z = pz;
         predicted_pub_->publish(predicted_msg);
 
-        // ── Find next table landing point ─────────────────────────────────────
         auto landing = findLanding(x0, vx, y0, vy, z0, vz, t_now);
         if (landing.has_value()) {
             auto landing_msg = geometry_msgs::msg::PointStamped();
-            landing_msg.header.stamp = msg->header.stamp;
-            landing_msg.header.frame_id = "stereo_camera_frame";
+            landing_msg.header.stamp    = msg->header.stamp;
+            landing_msg.header.frame_id = "camera_left_optical_frame";
             landing_msg.point.x = landing->x;
             landing_msg.point.y = table_y_;
             landing_msg.point.z = landing->z;
@@ -125,7 +136,7 @@ private:
         }
     }
 
-    // ── Linear least squares fit: pos = p0 + v*t ─────────────────────────────
+    // ── Linear least squares: pos = p0 + v*t ─────────────────────────────────
     void fitLinear(const std::vector<double>& t, const std::vector<double>& p,
                    double& p0, double& v)
     {
@@ -140,20 +151,18 @@ private:
         p0 = (sum_p - v * sum_t) / n;
     }
 
-    // ── Parabolic fit: pos = y0 + vy*t - 0.5*g*t²  ───────────────────────────
-    // Gravity is known, so we subtract it and fit the remainder linearly
-    void fitParabolic(const std::vector<double>& t, const std::vector<double>& y,
-                      double& y0, double& vy)
+    // ── Parabolic fit: pos = p0 + v*t - 0.5*gcomp*t² ─────────────────────────
+    // Pass gcomp = gravity_y_ for Y, or -gravity_z_ for Z (see sign note in caller)
+    void fitParabolic(const std::vector<double>& t, const std::vector<double>& p,
+                      double gcomp, double& p0, double& v)
     {
-        // Remove known gravity component then fit linear
-        std::vector<double> y_corrected(y.size());
-        for (size_t i = 0; i < y.size(); i++) {
-            y_corrected[i] = y[i] + 0.5 * gravity_ * t[i] * t[i];
-        }
-        fitLinear(t, y_corrected, y0, vy);
+        std::vector<double> corrected(p.size());
+        for (size_t i = 0; i < p.size(); i++)
+            corrected[i] = p[i] + 0.5 * gcomp * t[i] * t[i];
+        fitLinear(t, corrected, p0, v);
     }
 
-    // ── Predict position, handling one bounce off the table ───────────────────
+    // ── Predict position, handling one bounce ─────────────────────────────────
     struct PredResult { double x, y, z; bool bounced; };
 
     PredResult predictWithBounce(
@@ -162,10 +171,8 @@ private:
     {
         double dt = t_pred - t_now;
 
-        // Check if ball hits table before t_pred
-        // Solve: y0 + vy*dt_b - 0.5*g*dt_b² = table_y
-        // → 0.5*g*dt_b² - vy*dt_b + (table_y - y0) = 0
-        double a = 0.5 * gravity_;
+        // Bounce detection: solve y0 + vy*dt_b - 0.5*gravity_y*dt_b² = table_y
+        double a = 0.5 * gravity_y_;
         double b = -vy;
         double c = table_y_ - y0;
         double disc = b*b - 4*a*c;
@@ -174,30 +181,26 @@ private:
             double sqrt_disc = std::sqrt(disc);
             double t1 = (-b - sqrt_disc) / (2*a);
             double t2 = (-b + sqrt_disc) / (2*a);
-            // Pick smallest positive root
             double t_bounce = -1.0;
             if (t1 > 1e-3 && t1 < dt) t_bounce = t1;
             if (t2 > 1e-3 && t2 < dt && (t_bounce < 0 || t2 < t_bounce)) t_bounce = t2;
 
             if (t_bounce > 0) {
-                // Position at bounce
                 double bx = x0 + vx * t_bounce;
-                double bz = z0 + vz * t_bounce;
-                // Velocity at bounce — flip Y with restitution
-                double bvy = -(vy - gravity_ * t_bounce) * restitution_;
-                // Remaining time after bounce
+                double bz = z0 + vz * t_bounce - 0.5 * gravity_z_ * t_bounce * t_bounce;
+                double bvy = -(vy - gravity_y_ * t_bounce) * restitution_;
+                double bvz =   vz - gravity_z_ * t_bounce;   // Z vel unchanged at bounce
                 double dt_rem = dt - t_bounce;
-                double px = bx + vx * dt_rem;
-                double py = table_y_ + bvy * dt_rem - 0.5 * gravity_ * dt_rem * dt_rem;
-                double pz = bz + vz * dt_rem;
+                double px = bx + vx  * dt_rem;
+                double py = table_y_ + bvy * dt_rem - 0.5 * gravity_y_ * dt_rem * dt_rem;
+                double pz = bz + bvz * dt_rem - 0.5 * gravity_z_ * dt_rem * dt_rem;
                 return {px, py, pz, true};
             }
         }
 
-        // No bounce — straight projectile
         double px = x0 + vx * dt;
-        double py = y0 + vy * dt - 0.5 * gravity_ * dt * dt;
-        double pz = z0 + vz * dt;
+        double py = y0 + vy * dt - 0.5 * gravity_y_ * dt * dt;
+        double pz = z0 + vz * dt - 0.5 * gravity_z_ * dt * dt;
         return {px, py, pz, false};
     }
 
@@ -208,7 +211,7 @@ private:
         double x0, double vx, double y0, double vy,
         double z0, double vz, double t_now)
     {
-        double a = 0.5 * gravity_;
+        double a = 0.5 * gravity_y_;
         double b = -vy;
         double c = table_y_ - y0;
         double disc = b*b - 4*a*c;
@@ -225,14 +228,15 @@ private:
 
         return LandingResult{
             x0 + vx * t_land,
-            z0 + vz * t_land,
+            z0 + vz * t_land - 0.5 * gravity_z_ * t_land * t_land,
             t_land
         };
     }
 
     // ── Members ───────────────────────────────────────────────────────────────
     int lookahead_ms_, min_samples_, max_samples_;
-    double gravity_, table_y_, restitution_;
+    double gravity_, gravity_y_, gravity_z_;
+    double table_y_, restitution_;
     double t0_ = 0.0;
 
     std::deque<Sample> buffer_;
