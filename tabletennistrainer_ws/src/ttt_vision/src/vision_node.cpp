@@ -1,249 +1,206 @@
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 #include <ttt_msgs/msg/ball_detection.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/cudafilters.hpp>
 #include <opencv2/cudaarithm.hpp>
 #include <opencv2/cudaimgproc.hpp>
-#include <chrono>
 
 class VisionNode : public rclcpp::Node {
 public:
     VisionNode() : Node("vision_node") {
-        this->declare_parameter("camera_id",        "left");
-        this->declare_parameter("min_radius",        4);
-        this->declare_parameter("max_radius",       40);
-        this->declare_parameter("min_brightness",   10);
-        this->declare_parameter("min_contrast",      6);
-        this->declare_parameter("min_circularity",  0.35);
-        this->declare_parameter("max_aspect_ratio",  3.5);
-        this->declare_parameter("diff_threshold",   15);   // pixel diff to count as motion
-        this->declare_parameter("show_window",      false);
-        this->declare_parameter("noise_cell_size",       8);
-        this->declare_parameter("noise_suppress_thresh", 4.0);
-        this->declare_parameter("noise_decay_per_sec",   0.3);
-        this->declare_parameter("edge_margin",          30);
+        this->declare_parameter("camera_id", "left");
+        this->declare_parameter("min_circularity", 0.65);
+        this->declare_parameter("min_radius", 4);
+        this->declare_parameter("max_radius", 25);
+        this->declare_parameter("edge_margin", 25);
+        this->declare_parameter("motion_threshold", 30);  // pixel diff to flag as motion
+        this->declare_parameter("min_brightness",   200); // original frame brightness at blob centre
+        this->declare_parameter("dilate_iters",       2); // fill ball blob after diff
+        // Manual 4-corner ROI [x0,y0,…,x3,y3].  Leave empty → auto-detect.
+        this->declare_parameter("table_roi", std::vector<int64_t>{});
 
         camera_id_        = this->get_parameter("camera_id").as_string();
+        min_circularity_  = this->get_parameter("min_circularity").as_double();
         min_radius_       = this->get_parameter("min_radius").as_int();
         max_radius_       = this->get_parameter("max_radius").as_int();
+        edge_margin_      = this->get_parameter("edge_margin").as_int();
+        motion_threshold_ = this->get_parameter("motion_threshold").as_int();
         min_brightness_   = this->get_parameter("min_brightness").as_int();
-        min_contrast_     = this->get_parameter("min_contrast").as_int();
-        min_circularity_  = this->get_parameter("min_circularity").as_double();
-        max_aspect_ratio_ = this->get_parameter("max_aspect_ratio").as_double();
-        diff_threshold_   = this->get_parameter("diff_threshold").as_int();
-        show_window_      = this->get_parameter("show_window").as_bool();
-        noise_cell_size_       = this->get_parameter("noise_cell_size").as_int();
-        noise_suppress_thresh_ = this->get_parameter("noise_suppress_thresh").as_double();
-        noise_decay_per_sec_   = this->get_parameter("noise_decay_per_sec").as_double();
-        edge_margin_           = this->get_parameter("edge_margin").as_int();
+        dilate_iters_     = this->get_parameter("dilate_iters").as_int();
 
-        gaussian_filter_ = cv::cuda::createGaussianFilter(
-            CV_8UC1, CV_8UC1, cv::Size(5, 5), 0);
+        auto roi_vec = this->get_parameter("table_roi").as_integer_array();
+        if (roi_vec.size() == 8) {
+            for (int i = 0; i < 4; i++)
+                table_roi_.emplace_back((int)roi_vec[i*2], (int)roi_vec[i*2+1]);
+            auto_detect_ = false;
+            RCLCPP_INFO(this->get_logger(),
+                "[%s] Manual table ROI: (%ld,%ld) (%ld,%ld) (%ld,%ld) (%ld,%ld)",
+                camera_id_.c_str(),
+                roi_vec[0],roi_vec[1], roi_vec[2],roi_vec[3],
+                roi_vec[4],roi_vec[5], roi_vec[6],roi_vec[7]);
+        } else {
+            auto_detect_ = true;
+            RCLCPP_INFO(this->get_logger(),
+                "[%s] Auto table-detect ON", camera_id_.c_str());
+        }
 
-        cv::Mat dk = cv::getStructuringElement(cv::MORPH_ELLIPSE, {9, 9});
-        dilate_filter_ = cv::cuda::createMorphologyFilter(
-            cv::MORPH_DILATE, CV_8UC1, dk);
+        gaussian_filter_ = cv::cuda::createGaussianFilter(CV_8UC1, CV_8UC1, cv::Size(5, 5), 0);
+        dilate_kernel_   = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(9, 9));
+        open_kernel_     = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
+        detect_kernel_   = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(11, 11));
 
-        image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-            "/camera/" + camera_id_ + "/image_raw", 10,
+        image_sub_ = this->create_subscription<sensor_msgs::msg::CompressedImage>(
+            "/camera/" + camera_id_ + "/compressed", 10,
             std::bind(&VisionNode::imageCallback, this, std::placeholders::_1));
 
         detection_pub_ = this->create_publisher<ttt_msgs::msg::BallDetection>(
             "/ball_detection/" + camera_id_, 10);
 
-        last_decay_time_ = std::chrono::steady_clock::now();
-
         RCLCPP_INFO(this->get_logger(),
-            "[%s] frame-diff thresh=%d | r=%d-%d circ=%.2f | noise cell=%d thresh=%.1f | edge=%dpx",
-            camera_id_.c_str(), diff_threshold_,
-            min_radius_, max_radius_, min_circularity_,
-            noise_cell_size_, noise_suppress_thresh_, edge_margin_);
-
-        if (show_window_) {
-            cv::namedWindow("Vision - "  + camera_id_, cv::WINDOW_AUTOSIZE);
-            cv::namedWindow("Diff - "    + camera_id_, cv::WINDOW_AUTOSIZE);
-        }
+            "[%s] Vision node online | motion>%d AND brightness>%d",
+            camera_id_.c_str(), motion_threshold_, min_brightness_);
     }
 
 private:
-    void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg) {
-        auto t0 = std::chrono::high_resolution_clock::now();
+    // ── Auto-detect table from dark surface ──────────────────────────────────
+    void autoDetectTable(const cv::Mat& gray) {
+        cv::Mat dark;
+        cv::threshold(gray, dark, 60, 255, cv::THRESH_BINARY_INV);
+        cv::morphologyEx(dark, dark, cv::MORPH_CLOSE, detect_kernel_);
+        cv::morphologyEx(dark, dark, cv::MORPH_OPEN,  detect_kernel_);
 
-        cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, "mono8");
-        const cv::Mat& img = cv_ptr->image;
-        const int W = img.cols, H = img.rows;
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(dark, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        if (contours.empty()) return;
 
-        // Init noise map on first frame
-        int map_cols = (W + noise_cell_size_ - 1) / noise_cell_size_;
-        int map_rows = (H + noise_cell_size_ - 1) / noise_cell_size_;
-        if (noise_map_.empty()) {
-            noise_map_ = cv::Mat::zeros(map_rows, map_cols, CV_32F);
+        std::sort(contours.begin(), contours.end(),
+            [](const auto& a, const auto& b){ return cv::contourArea(a) > cv::contourArea(b); });
+
+        double min_area = gray.cols * gray.rows * 0.12;
+        for (const auto& c : contours) {
+            if (cv::contourArea(c) < min_area) break;
+            std::vector<cv::Point> approx;
+            cv::approxPolyDP(c, approx, 0.03 * cv::arcLength(c, true), true);
+            std::vector<cv::Point> hull;
+            cv::convexHull(approx, hull);
+            if (hull.size() < 4 || hull.size() > 6) continue;
+            table_roi_ = hull;
+            RCLCPP_INFO(this->get_logger(),
+                "[%s] Table auto-detected: %zu corners, %.0f%% of frame — ROI locked",
+                camera_id_.c_str(), hull.size(),
+                100.0 * cv::contourArea(hull) / (gray.cols * gray.rows));
+            return;
+        }
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+            "[%s] Auto-detect: no table yet (attempt %d)", camera_id_.c_str(), detect_attempt_);
+    }
+
+    // ── Main callback ─────────────────────────────────────────────────────────
+    void imageCallback(const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+        cv::Mat img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_GRAYSCALE);
+        if (img.empty()) return;
+
+        if (auto_detect_ && table_roi_.empty()) {
+            if (++detect_attempt_ % 10 == 1)
+                autoDetectTable(img);
         }
 
-        // 1. Upload + blur
+        // ── Build the ROI mask once per unique ROI ────────────────────────────
+        if (!table_roi_.empty() && (roi_mask_.empty() ||
+            roi_mask_.size() != img.size())) {
+            roi_mask_ = cv::Mat::zeros(img.size(), CV_8UC1);
+            cv::fillPoly(roi_mask_,
+                std::vector<std::vector<cv::Point>>{table_roi_}, 255);
+        }
+
+        // ── GPU pipeline ──────────────────────────────────────────────────────
         gpu_frame_.upload(img);
+
+        // Blur for noise-robust diff
         gaussian_filter_->apply(gpu_frame_, gpu_blurred_);
 
-        // 2. Need two frames for differencing
-        if (gpu_prev_.empty()) {
-            gpu_blurred_.copyTo(gpu_prev_);
+        // Brightness mask: white ball on dark table
+        cv::cuda::threshold(gpu_frame_, gpu_bright_, min_brightness_, 255, cv::THRESH_BINARY);
+
+        if (gpu_prev_blurred_.empty()) {
+            gpu_blurred_.copyTo(gpu_prev_blurred_);
             return;
         }
 
-        // 3. Absolute frame difference
-        cv::cuda::absdiff(gpu_blurred_, gpu_prev_, gpu_diff_);
-        gpu_blurred_.copyTo(gpu_prev_);
+        // Motion mask: pixels that changed significantly since last frame
+        cv::cuda::absdiff(gpu_blurred_, gpu_prev_blurred_, gpu_diff_);
+        cv::cuda::threshold(gpu_diff_, gpu_motion_, motion_threshold_, 255, cv::THRESH_BINARY);
+        gpu_blurred_.copyTo(gpu_prev_blurred_);
 
-        // 4. Threshold to binary motion mask
-        cv::cuda::threshold(gpu_diff_, gpu_thresh_, diff_threshold_, 255, cv::THRESH_BINARY);
+        // AND gate: must be BOTH moving AND bright white
+        cv::cuda::bitwise_and(gpu_motion_, gpu_bright_, gpu_combined_);
 
-        // 5. Dilate to connect ball pixels
-        dilate_filter_->apply(gpu_thresh_, gpu_dilated_);
+        cv::Mat mask;
+        gpu_combined_.download(mask);
 
-        // 6. Download motion mask
-        cv::Mat fg_mask;
-        gpu_dilated_.download(fg_mask);
+        // ── CPU morphology ────────────────────────────────────────────────────
+        // Dilate fills the hollow ring the diff creates around the ball edges
+        for (int i = 0; i < dilate_iters_; i++)
+            cv::dilate(mask, mask, dilate_kernel_);
+        // Open removes thin residual noise
+        cv::morphologyEx(mask, mask, cv::MORPH_OPEN, open_kernel_);
 
-        // 7. Time-based noise map decay
-        auto now = std::chrono::steady_clock::now();
-        double dt_sec = std::chrono::duration<double>(now - last_decay_time_).count();
-        last_decay_time_ = now;
-        noise_map_ *= static_cast<float>(std::pow(noise_decay_per_sec_, dt_sec));
+        // ── Apply table ROI ───────────────────────────────────────────────────
+        if (!roi_mask_.empty())
+            cv::bitwise_and(mask, roi_mask_, mask);
 
-        // 8. Find contours
+        // ── Find ball ────────────────────────────────────────────────────────
         std::vector<std::vector<cv::Point>> contours;
-        cv::findContours(fg_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-        const double min_area = M_PI * min_radius_ * min_radius_;
-        const double max_area = M_PI * max_radius_ * max_radius_;
-
-        auto detect_msg = ttt_msgs::msg::BallDetection();
-        detect_msg.header = msg->header;
-        detect_msg.x = -1.0;
-        detect_msg.y = -1.0;
-
-        float best_score = -1.0f;
+        auto det_msg = ttt_msgs::msg::BallDetection();
+        det_msg.header = msg->header;
+        det_msg.x = -1.0; det_msg.y = -1.0;
+        float best_score = 0.0;
 
         for (const auto& contour : contours) {
             double area = cv::contourArea(contour);
-            if (area < min_area || area > max_area) continue;
+            if (area < 5) continue;
 
             double perimeter = cv::arcLength(contour, true);
-            if (perimeter < 1.0) continue;
-            double circularity = 4.0 * M_PI * area / (perimeter * perimeter);
+            if (perimeter < 5) continue;
+
+            double circularity = (4.0 * M_PI * area) / (perimeter * perimeter);
+            if (circularity <= min_circularity_) continue;
 
             cv::Point2f center;
             float radius;
+            cv::minEnclosingCircle(contour, center, radius);
 
-            if (circularity >= min_circularity_) {
-                cv::minEnclosingCircle(contour, center, radius);
-            } else {
-                // Streak fallback for motion-blurred ball
-                cv::RotatedRect rect = cv::minAreaRect(contour);
-                float major = std::max(rect.size.width, rect.size.height) / 2.0f;
-                float minor = std::min(rect.size.width, rect.size.height) / 2.0f;
-                if (minor < 1.0f) continue;
-                if (major / minor > max_aspect_ratio_) continue;
-                if (minor < min_radius_ || minor > max_radius_) continue;
-                center = rect.center;
-                radius = minor;
-                circularity *= 0.5f;
-            }
+            if (radius < min_radius_ || radius > max_radius_) continue;
 
-            int cx = cvRound(center.x);
-            int cy = cvRound(center.y);
-            int r  = cvRound(radius);
-            int r2 = r + std::max(3, r / 2);
-            if (cx < 0 || cx >= W || cy < 0 || cy >= H) continue;
+            if (center.x < edge_margin_ || center.x > img.cols - edge_margin_) continue;
+            if (center.y < edge_margin_ || center.y > img.rows - edge_margin_) continue;
 
-            // Reject detections near frame edge
-            if (cx < edge_margin_ || cx >= W - edge_margin_ ||
-                cy < edge_margin_ || cy >= H - edge_margin_) continue;
-
-            // Noise suppression: reject cells that fire too often
-            int ncx = std::min(cx / noise_cell_size_, map_cols - 1);
-            int ncy = std::min(cy / noise_cell_size_, map_rows - 1);
-            noise_map_.at<float>(ncy, ncx) += 1.0f;
-            if (noise_map_.at<float>(ncy, ncx) >= noise_suppress_thresh_) continue;
-
-            // Brightness + contrast check on original image
-            auto make_roi = [&](int half) -> cv::Rect {
-                return cv::Rect(
-                    std::max(0, cx - half), std::max(0, cy - half),
-                    std::min(W, cx + half) - std::max(0, cx - half),
-                    std::min(H, cy + half) - std::max(0, cy - half));
-            };
-            cv::Rect inner_roi = make_roi(r);
-            cv::Rect outer_roi = make_roi(r2);
-            if (inner_roi.area() < 4) continue;
-
-            double inner_mean = cv::mean(img(inner_roi))[0];
-            if (inner_mean < min_brightness_) continue;
-
-            int ring_area = outer_roi.area() - inner_roi.area();
-            if (ring_area >= 4) {
-                double outer_mean =
-                    (cv::mean(img(outer_roi))[0] * outer_roi.area()
-                     - inner_mean * inner_roi.area()) / ring_area;
-                if (inner_mean - outer_mean < min_contrast_) continue;
-            }
-
-            float score = static_cast<float>(
-                0.5 * circularity +
-                0.3 * (inner_mean / 255.0) +
-                0.2 * std::min(1.0, area / (M_PI * max_radius_ * max_radius_)));
-
-            if (score > best_score) {
-                best_score            = score;
-                detect_msg.x          = center.x;
-                detect_msg.y          = center.y;
-                detect_msg.radius     = radius;
-                detect_msg.confidence = score;
+            if (circularity > best_score) {
+                best_score = circularity;
+                det_msg.x = center.x;
+                det_msg.y = center.y;
+                det_msg.radius = radius;
+                det_msg.confidence = circularity;
             }
         }
-
-        detection_pub_->publish(detect_msg);
-
-        if (show_window_) {
-            cv::Mat display;
-            cv::cvtColor(img, display, cv::COLOR_GRAY2BGR);
-            if (detect_msg.x >= 0) {
-                cv::Point c(cvRound(detect_msg.x), cvRound(detect_msg.y));
-                cv::circle(display, c, cvRound(detect_msg.radius), {0, 255, 0}, 2);
-                cv::circle(display, c, 2, {0, 0, 255}, -1);
-            }
-            cv::imshow("Vision - " + camera_id_, display);
-            cv::Mat fg_display;
-            cv::cvtColor(fg_mask, fg_display, cv::COLOR_GRAY2BGR);
-            cv::imshow("Diff - " + camera_id_, fg_display);
-            cv::waitKey(1);
-        }
-
-        auto t1 = std::chrono::high_resolution_clock::now();
-        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
-            "[%s] %.2f ms | contours=%zu | score=%.2f",
-            camera_id_.c_str(),
-            std::chrono::duration<double, std::milli>(t1 - t0).count(),
-            contours.size(), best_score);
+        detection_pub_->publish(det_msg);
     }
 
     std::string camera_id_;
-    int    min_radius_, max_radius_, min_brightness_, min_contrast_, diff_threshold_;
-    double min_circularity_, max_aspect_ratio_;
-    bool   show_window_;
-    int    noise_cell_size_, edge_margin_;
-    double noise_suppress_thresh_, noise_decay_per_sec_;
-    cv::Mat noise_map_;
-    std::chrono::steady_clock::time_point last_decay_time_;
-
-    cv::cuda::GpuMat gpu_frame_, gpu_blurred_, gpu_prev_;
-    cv::cuda::GpuMat gpu_diff_, gpu_thresh_, gpu_dilated_;
+    int min_radius_, max_radius_, edge_margin_, motion_threshold_, min_brightness_, dilate_iters_;
+    double min_circularity_;
+    bool auto_detect_ = false;
+    int detect_attempt_ = 0;
+    std::vector<cv::Point> table_roi_;
+    cv::Mat roi_mask_, dilate_kernel_, open_kernel_, detect_kernel_;
+    cv::cuda::GpuMat gpu_frame_, gpu_blurred_, gpu_prev_blurred_;
+    cv::cuda::GpuMat gpu_diff_, gpu_motion_, gpu_bright_, gpu_combined_;
     cv::Ptr<cv::cuda::Filter> gaussian_filter_;
-    cv::Ptr<cv::cuda::Filter> dilate_filter_;
-
-    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr   image_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr image_sub_;
     rclcpp::Publisher<ttt_msgs::msg::BallDetection>::SharedPtr detection_pub_;
 };
 

@@ -26,8 +26,8 @@ def generate_launch_description():
             parameters=[{
                 'device': '/dev/video0',
                 'camera_id': 'left',
-                'width': 640,
-                'height': 400,
+                'width': 1280,
+                'height': 800,
                 'fps': 60,
                 'show_window': False
             }],

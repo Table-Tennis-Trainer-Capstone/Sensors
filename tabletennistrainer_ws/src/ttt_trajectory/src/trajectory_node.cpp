@@ -23,6 +23,10 @@ public:
         this->declare_parameter("table_y",          0.0);   // Y of table in camera frame — measure after mounting
         this->declare_parameter("restitution",      0.85);
         this->declare_parameter("camera_tilt_deg",  0.0);   // positive = pitched down
+        // net_z: Z depth of the net in camera frame (metres). Ball detections with
+        // Z > net_z are on the opponent's side — buffer is cleared and tracking waits.
+        // Set to 0.0 (default) to disable gating and track everywhere.
+        this->declare_parameter("net_z",            0.0);
         //   0°  → camera level    → gravity only in Y
         //   45° → 45° down tilt  → gravity split equally between Y and Z
         //   90° → straight down  → gravity only in Z
@@ -33,6 +37,7 @@ public:
         gravity_       = this->get_parameter("gravity").as_double();
         table_y_       = this->get_parameter("table_y").as_double();
         restitution_   = this->get_parameter("restitution").as_double();
+        net_z_         = this->get_parameter("net_z").as_double();
 
         double tilt_rad = this->get_parameter("camera_tilt_deg").as_double() * M_PI / 180.0;
         gravity_y_ =  gravity_ * std::cos(tilt_rad);  // component along camera Y (down in image)
@@ -58,6 +63,15 @@ public:
 
 private:
     void positionCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
+
+        // Net-Z gate: if enabled, ball on opponent's side (Z > net_z) resets tracking
+        if (net_z_ > 0.0 && msg->point.z > net_z_) {
+            if (!buffer_.empty()) {
+                RCLCPP_INFO(this->get_logger(), "Ball crossed back over net (Z=%.3f > %.3f) — resetting", msg->point.z, net_z_);
+                buffer_.clear();
+            }
+            return;
+        }
 
         double t_abs = rclcpp::Time(msg->header.stamp).seconds();
 
@@ -236,7 +250,7 @@ private:
     // ── Members ───────────────────────────────────────────────────────────────
     int lookahead_ms_, min_samples_, max_samples_;
     double gravity_, gravity_y_, gravity_z_;
-    double table_y_, restitution_;
+    double table_y_, restitution_, net_z_;
     double t0_ = 0.0;
 
     std::deque<Sample> buffer_;

@@ -11,10 +11,10 @@ public:
     CameraNode() : Node("camera_node"), frame_count_(0) {
         this->declare_parameter("device", "/dev/video0");
         this->declare_parameter("camera_id", "left");
-        this->declare_parameter("width", 640);
-        this->declare_parameter("height", 480);
-        this->declare_parameter("fps", 240);
-        this->declare_parameter("exposure", 800);
+        this->declare_parameter("width", 1280);
+        this->declare_parameter("height", 800);
+        this->declare_parameter("fps", 120);
+        this->declare_parameter("exposure", 7000);
         this->declare_parameter("analogue_gain", 1000);
 
         std::string device = this->get_parameter("device").as_string();
@@ -56,9 +56,9 @@ public:
         compressed_pub_ = this->create_publisher<sensor_msgs::msg::CompressedImage>(
             "/camera/" + camera_id_ + "/compressed", 10);
 
-        // 240 FPS = ~4.16ms per frame
+        // 120 FPS = ~8.33ms per frame
         timer_ = this->create_wall_timer(
-            std::chrono::microseconds(4100),
+            std::chrono::microseconds(8333),
             std::bind(&CameraNode::captureFrame, this));
         fps_timer_ = this->create_wall_timer(
             std::chrono::seconds(1),
@@ -85,17 +85,12 @@ private:
         info_msg.header = msg->header;
         camera_info_pub_->publish(info_msg);
 
-        static int throttle_count = 0;
-        if (throttle_count++ % 4 == 0) {
-            auto comp_msg = sensor_msgs::msg::CompressedImage();
-            comp_msg.header.stamp = this->now();
-            comp_msg.header.frame_id = camera_id_ + "_optical_frame";
-            comp_msg.format = "jpeg";
-
-            // Quality 70 is the sweet spot for speed vs clarity
-            cv::imencode(".jpg", frame, comp_msg.data, { cv::IMWRITE_JPEG_QUALITY, 70 });
-            compressed_pub_->publish(comp_msg);
-        }
+        auto comp_msg = sensor_msgs::msg::CompressedImage();
+        comp_msg.header.stamp = this->now();
+        comp_msg.header.frame_id = camera_id_ + "_optical_frame";
+        comp_msg.format = "jpeg";
+        cv::imencode(".jpg", frame, comp_msg.data, { cv::IMWRITE_JPEG_QUALITY, 70 });
+        compressed_pub_->publish(comp_msg);
 
         frame_count_++;
     }

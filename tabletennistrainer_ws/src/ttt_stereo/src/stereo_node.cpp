@@ -17,11 +17,11 @@ public:
         // fx/fy: focal length in pixels.
         //   Estimate: fx ≈ width / (2 * tan(FOV/2))
         //   For 640px wide, ~90° FOV → fx ≈ 320
-        this->declare_parameter("fx", 320.0);
-        this->declare_parameter("fy", 320.0);
+        this->declare_parameter("fx", 448.2);
+        this->declare_parameter("fy", 400.0);
         // cx/cy: principal point — default to image center
-        this->declare_parameter("cx", 320.0);
-        this->declare_parameter("cy", 200.0);
+        this->declare_parameter("cx", 640.0);
+        this->declare_parameter("cy", 400.0);
         // baseline: physical distance between the two cameras in meters
         this->declare_parameter("baseline_m", 0.3);
         // max age: reject detection pairs further apart than this (ms)
