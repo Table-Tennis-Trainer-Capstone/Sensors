@@ -12,33 +12,27 @@ class VisionNode : public rclcpp::Node {
 public:
     VisionNode() : Node("vision_node") {
         this->declare_parameter("camera_id",       "left");
-        this->declare_parameter("min_area",          8);    // min blob pixel area
-        this->declare_parameter("max_area",       2000);    // max blob pixel area
+        this->declare_parameter("min_area",          8);    // minimum blob area (px²)
+        this->declare_parameter("max_area",       2000);   // maximum blob area (px²)
         this->declare_parameter("edge_margin",      10);
-        this->declare_parameter("motion_threshold", 15);    // pixel diff to flag as motion
-        this->declare_parameter("min_contrast",     30);    // blob interior vs annulus in orig frame
-        this->declare_parameter("dilate_iters",      3);    // fill ball blob after diff
-        this->declare_parameter("consistency_min",   2);    // hits required in 3-frame window
-        this->declare_parameter("kf_gate_px",        150.0);
-        this->declare_parameter("kf_reset_misses",   30);   // frames to coast before reset
-        this->declare_parameter("kf_process_noise",   0.05);
-        this->declare_parameter("hysteresis_r",       1);  // px radius to search for static ball
-        this->declare_parameter("hysteresis_thresh", 180);  // min brightness to count as ball
+        this->declare_parameter("motion_threshold", 15);  // pixel diff to flag as motion
+        this->declare_parameter("min_contrast",     30);  // blob interior vs annulus in orig frame
+        this->declare_parameter("dilate_iters",      3);  // fill ball blob after diff
+        this->declare_parameter("consistency_min",   2);  // hits required in 3-frame window
+        this->declare_parameter("kf_gate_px",       50.0);
+        this->declare_parameter("kf_reset_misses",  10);
         this->declare_parameter("table_roi", std::vector<int64_t>{});
 
         camera_id_        = this->get_parameter("camera_id").as_string();
-        min_area_         = this->get_parameter("min_area").as_int();
-        max_area_         = this->get_parameter("max_area").as_int();
+        min_radius_       = this->get_parameter("min_radius").as_int();
+        max_radius_       = this->get_parameter("max_radius").as_int();
         edge_margin_      = this->get_parameter("edge_margin").as_int();
         motion_threshold_ = this->get_parameter("motion_threshold").as_int();
         min_contrast_     = this->get_parameter("min_contrast").as_int();
         dilate_iters_     = this->get_parameter("dilate_iters").as_int();
         consistency_min_  = this->get_parameter("consistency_min").as_int();
         kf_gate_px_sq_    = std::pow(this->get_parameter("kf_gate_px").as_double(), 2.0);
-        kf_reset_misses_     = this->get_parameter("kf_reset_misses").as_int();
-        kf_process_noise_    = (float)this->get_parameter("kf_process_noise").as_double();
-        hysteresis_r_        = this->get_parameter("hysteresis_r").as_int();
-        hysteresis_thresh_   = this->get_parameter("hysteresis_thresh").as_int();
+        kf_reset_misses_  = this->get_parameter("kf_reset_misses").as_int();
 
         auto roi_vec = this->get_parameter("table_roi").as_integer_array();
         if (roi_vec.size() == 8) {
@@ -66,7 +60,7 @@ public:
         kf_.measurementMatrix = (cv::Mat_<float>(2, 4) <<
             1, 0, 0, 0,
             0, 1, 0, 0);
-        cv::setIdentity(kf_.processNoiseCov,     cv::Scalar::all(kf_process_noise_));
+        cv::setIdentity(kf_.processNoiseCov,     cv::Scalar::all(1e-4f));
         cv::setIdentity(kf_.measurementNoiseCov, cv::Scalar::all(0.1f));
         cv::setIdentity(kf_.errorCovPost,        cv::Scalar::all(1.0f));
 
@@ -109,8 +103,8 @@ public:
             "/ball_detection/" + camera_id_, 10);
 
         RCLCPP_INFO(this->get_logger(),
-            "[%s] Vision node online | motion>%d contrast>%d area=[%d-%d]",
-            camera_id_.c_str(), motion_threshold_, min_contrast_, min_area_, max_area_);
+            "[%s] Vision node online | motion>%d contrast>%d r=[%d-%d]",
+            camera_id_.c_str(), motion_threshold_, min_contrast_, min_radius_, max_radius_);
     }
 
 private:
@@ -169,6 +163,25 @@ private:
             "[%s] Auto-detect: no table yet (attempt %d)", camera_id_.c_str(), detect_attempt_);
     }
 
+    // ── Contrast check: mean brightness inside blob vs surrounding annulus ───
+    // Returns (interior_mean - annulus_mean). High = bright object on dark bg.
+    double localContrast(const cv::Mat& gray, cv::Point2f center, float radius) {
+        int cx = std::clamp((int)center.x, 0, gray.cols - 1);
+        int cy = std::clamp((int)center.y, 0, gray.rows - 1);
+        int inner_r = std::max(1, (int)radius);
+        int outer_r = std::max(inner_r + 2, (int)(radius * 2.5f));
+
+        cv::Mat inner_mask = cv::Mat::zeros(gray.size(), CV_8UC1);
+        cv::Mat outer_mask = cv::Mat::zeros(gray.size(), CV_8UC1);
+        cv::circle(inner_mask, cv::Point(cx, cy), inner_r, 255, -1);
+        cv::circle(outer_mask, cv::Point(cx, cy), outer_r, 255, -1);
+        cv::subtract(outer_mask, inner_mask, outer_mask); // annulus only
+
+        double mean_in  = cv::mean(gray, inner_mask)[0];
+        double mean_out = cv::mean(gray, outer_mask)[0];
+        return mean_in - mean_out;
+    }
+
     // ── Main callback ─────────────────────────────────────────────────────────
     void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg) {
         cv::Mat img;
@@ -190,16 +203,8 @@ private:
         if (!table_roi_.empty() &&
             (roi_mask_.empty() || roi_mask_.size() != img.size())) {
             roi_mask_ = cv::Mat::zeros(img.size(), CV_8UC1);
-            
-            // Extrude the table ROI straight up to the top of the image (y=0)
-            // so we can track the ball when it bounces high above the table!
-            std::vector<cv::Point> extended_roi = table_roi_;
-            for (const auto& pt : table_roi_) extended_roi.push_back(cv::Point(pt.x, 0));
-            std::vector<cv::Point> extended_hull;
-            cv::convexHull(extended_roi, extended_hull);
-
             cv::fillPoly(roi_mask_,
-                std::vector<std::vector<cv::Point>>{extended_hull}, 255);
+                std::vector<std::vector<cv::Point>>{table_roi_}, 255);
         }
 
         // ── GPU: blur → 3-frame diff → motion mask ───────────────────────────
@@ -216,10 +221,8 @@ private:
             return;
         }
 
-        // Subtract (t) - (t-2) instead of absolute difference.
-        // Since the ball is bright on a dark table, this perfectly isolates 
-        // where the ball IS NOW, entirely eliminating the "ghost" trail of where it was!
-        cv::cuda::subtract(gpu_blurred_, gpu_prev2_blurred_, gpu_diff_);
+        // Diff against t-2 for a stronger motion signal
+        cv::cuda::absdiff(gpu_blurred_, gpu_prev2_blurred_, gpu_diff_);
         cv::cuda::threshold(gpu_diff_, gpu_motion_, motion_threshold_, 255, cv::THRESH_BINARY);
 
         gpu_prev_blurred_.copyTo(gpu_prev2_blurred_);
@@ -244,53 +247,30 @@ private:
         bool found = false;
 
         for (const auto& contour : contours) {
-            // Size gate (using bounding box area is robust against pixelated/smeared shapes)
-            cv::Rect bbox = cv::boundingRect(contour);
-            double area = bbox.width * bbox.height;
-            if (area < min_area_ || area > max_area_) continue;
+            if (cv::contourArea(contour) < 4) continue;
 
-            cv::Point2f center(bbox.x + bbox.width / 2.0f, bbox.y + bbox.height / 2.0f);
+            cv::Point2f center;
+            float radius;
+            cv::minEnclosingCircle(contour, center, radius);
+
+            // Size gate
+            if (radius < min_radius_ || radius > max_radius_) continue;
 
             // Edge margin gate
             if (center.x < edge_margin_ || center.x > img.cols - edge_margin_) continue;
             if (center.y < edge_margin_ || center.y > img.rows - edge_margin_) continue;
 
-            // VERY minimal contrast check: Ensure the moving blob is fundamentally bright
-            cv::Mat roi = img(bbox);
-            cv::Mat mask_roi = motion_mask(bbox);
-            double brightness = cv::mean(roi, mask_roi)[0];
-            if (brightness < min_contrast_) continue;
+            // Contrast gate: bright blob on dark table → high positive contrast.
+            // Eliminates camera noise (flat surroundings) and shadow blobs (dark center).
+            double contrast = localContrast(img, center, radius);
+            if (contrast < min_contrast_) continue;
 
-            if (brightness > best_contrast) {
-                best_contrast = static_cast<float>(brightness);
+            if (contrast > best_contrast) {
+                best_contrast = static_cast<float>(contrast);
                 best_x = center.x;
                 best_y = center.y;
-                best_r = std::max(bbox.width, bbox.height) / 2.0f;
+                best_r = radius;
                 found = true;
-            }
-        }
-
-        // ── Hysteresis: static bright-blob search near last KF position ──────
-        // When the ball pauses (apex of arc) or motion is too small to trigger
-        // the frame-diff, scan the original image near the predicted position.
-        // This prevents the KF from resetting through slow/zero-velocity phases.
-        if (!found && kf_initialized_) {
-            int px = std::clamp((int)kf_.statePost.at<float>(0), 0, img.cols - 1);
-            int py = std::clamp((int)kf_.statePost.at<float>(1), 0, img.rows - 1);
-            cv::Rect box(
-                std::max(0,          px - hysteresis_r_),
-                std::max(0,          py - hysteresis_r_),
-                std::min(2*hysteresis_r_, img.cols - std::max(0, px - hysteresis_r_)),
-                std::min(2*hysteresis_r_, img.rows - std::max(0, py - hysteresis_r_)));
-            double max_val;
-            cv::Point max_loc;
-            cv::minMaxLoc(img(box), nullptr, &max_val, nullptr, &max_loc);
-            if (max_val >= hysteresis_thresh_) {
-                best_x       = (float)(box.x + max_loc.x);
-                best_y       = (float)(box.y + max_loc.y);
-                best_r       = 5.0f;
-                best_contrast = (float)max_val;
-                found        = true;
             }
         }
 
@@ -359,7 +339,7 @@ private:
 
     // ── Members ───────────────────────────────────────────────────────────────
     std::string camera_id_;
-    int min_area_, max_area_, edge_margin_, motion_threshold_, min_contrast_, dilate_iters_;
+    int min_radius_, max_radius_, edge_margin_, motion_threshold_, min_contrast_, dilate_iters_;
     bool auto_detect_ = false;
     int detect_attempt_ = 0;
     std::vector<cv::Point> table_roi_;
@@ -376,8 +356,8 @@ private:
     bool kf_initialized_ = false;
     int miss_count_ = 0;
     double last_stamp_ = 0.0;
-    float kf_gate_px_sq_, kf_process_noise_;
-    int kf_reset_misses_, hysteresis_r_, hysteresis_thresh_;
+    float kf_gate_px_sq_;
+    int kf_reset_misses_;
 
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;

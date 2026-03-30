@@ -25,7 +25,7 @@ public:
         // baseline: physical distance between the two cameras in meters
         this->declare_parameter("baseline_m", 0.3);
         // max age: reject detection pairs further apart than this (ms)
-        this->declare_parameter("max_sync_age_ms", 20);
+        this->declare_parameter("max_sync_age_ms", 50);
 
         fx_         = this->get_parameter("fx").as_double();
         fy_         = this->get_parameter("fy").as_double();

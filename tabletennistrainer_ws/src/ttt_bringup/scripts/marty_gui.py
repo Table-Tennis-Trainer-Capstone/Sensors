@@ -66,31 +66,31 @@ _HTML_PAGE = """<!DOCTYPE html>
   <div style="text-align:center;margin-bottom:8px;">
     <button onclick="toggleCal()" id="cal-btn" style="background:#222;color:#0f0;border:1px solid #0f0;padding:6px 18px;font-family:Consolas,monospace;cursor:pointer;font-size:13px;">&#9654; CALIBRATION</button>
   </div>
+  <div id="cal-panel" style="display:none;background:#1a1a1a;border:1px solid #0f0;border-radius:8px;padding:14px;margin:0 auto 10px;max-width:1200px;font-size:12px;">
+    <div style="color:#0f0;font-weight:bold;margin-bottom:6px;">Click 4 table corners on each camera image below (top-left &#8594; top-right &#8594; bottom-right &#8594; bottom-left). ROI applies automatically on the 4th click.</div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:280px;">
+        <div style="color:#aaa;margin-bottom:4px;">LEFT <span id="lcnt" style="color:#ff5">(0/4)</span>
+          <button onclick="resetCal('left')" style="background:#333;color:#f55;border:1px solid #f55;padding:2px 8px;cursor:pointer;font-size:11px;margin-left:8px;">Reset</button>
+          <span id="lapply-status" style="margin-left:10px;font-size:12px;"></span></div>
+        <div id="lpts" style="color:#ccc;line-height:1.8;min-height:48px;font-size:11px;"></div>
+      </div>
+      <div style="flex:1;min-width:280px;">
+        <div style="color:#aaa;margin-bottom:4px;">RIGHT <span id="rcnt" style="color:#ff5">(0/4)</span>
+          <button onclick="resetCal('right')" style="background:#333;color:#f55;border:1px solid #f55;padding:2px 8px;cursor:pointer;font-size:11px;margin-left:8px;">Reset</button>
+          <span id="rapply-status" style="margin-left:10px;font-size:12px;"></span></div>
+        <div id="rpts" style="color:#ccc;line-height:1.8;min-height:48px;font-size:11px;"></div>
+      </div>
+    </div>
+    <div style="margin-top:10px;border-top:1px solid #333;padding-top:8px;">
+      <span style="color:#aaa;font-size:11px;">Net Z — place ball at net: </span>
+      <button onclick="captureNetZ()" style="background:#222;color:#55f;border:1px solid #55f;padding:3px 10px;cursor:pointer;font-size:11px;font-family:Consolas,monospace;">Capture Net Z</button>
+      <span id="net-z-val" style="color:#0ff;margin-left:10px;font-family:Consolas,monospace;font-size:11px;"></span>
+    </div>
+  </div>
   <div class="feeds">
     <div class="feed"><h3>LEFT CAMERA (A)</h3><img id="img-left" src="/stream/left" onclick="imgClick(event,'left')" style="cursor:crosshair;"></div>
     <div class="feed"><h3>RIGHT CAMERA (B)</h3><img id="img-right" src="/stream/right" onclick="imgClick(event,'right')" style="cursor:crosshair;"></div>
-  </div>
-  <div id="cal-panel" style="display:none;background:#1a1a1a;border:1px solid #0f0;border-radius:8px;padding:14px;margin:10px auto;max-width:900px;font-size:12px;">
-    <div style="color:#0f0;font-weight:bold;margin-bottom:10px;">CALIBRATION — click 4 table corners on each camera (top-left, top-right, bottom-right, bottom-left)</div>
-    <div style="display:flex;gap:20px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:300px;">
-        <div style="color:#aaa;margin-bottom:4px;">LEFT CAMERA <span id="lcnt" style="color:#ff5">(0/4)</span>
-          <button onclick="resetCal('left')" style="background:#333;color:#f55;border:1px solid #f55;padding:2px 8px;cursor:pointer;font-size:11px;margin-left:8px;">Reset</button></div>
-        <div id="lpts" style="color:#ccc;line-height:1.8;min-height:60px;"></div>
-        <div id="lroi" style="color:#0ff;margin-top:6px;word-break:break-all;"></div>
-      </div>
-      <div style="flex:1;min-width:300px;">
-        <div style="color:#aaa;margin-bottom:4px;">RIGHT CAMERA <span id="rcnt" style="color:#ff5">(0/4)</span>
-          <button onclick="resetCal('right')" style="background:#333;color:#f55;border:1px solid #f55;padding:2px 8px;cursor:pointer;font-size:11px;margin-left:8px;">Reset</button></div>
-        <div id="rpts" style="color:#ccc;line-height:1.8;min-height:60px;"></div>
-        <div id="rroi" style="color:#0ff;margin-top:6px;word-break:break-all;"></div>
-      </div>
-    </div>
-    <div style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
-      <span style="color:#aaa;">Net Z — place ball at net then click: </span>
-      <button onclick="captureNetZ()" style="background:#222;color:#55f;border:1px solid #55f;padding:4px 12px;cursor:pointer;font-size:12px;font-family:Consolas,monospace;">Capture Net Z</button>
-      <span id="net-z-val" style="color:#0ff;margin-left:12px;font-family:Consolas,monospace;"></span>
-    </div>
   </div>
   <div class="stats">
     <div class="hdr">CURRENT POSITION (m)</div>
@@ -112,9 +112,9 @@ _HTML_PAGE = """<!DOCTYPE html>
   <script>
     function poll(){
       fetch('/api/stats').then(r=>r.json()).then(d=>{
-        document.getElementById('x').textContent=d.x.toFixed(2);
-        document.getElementById('y').textContent=d.y.toFixed(2);
-        document.getElementById('z').textContent=d.z.toFixed(2);
+        document.getElementById('x').textContent=d.x!==null?d.x.toFixed(2):'--';
+        document.getElementById('y').textContent=d.y!==null?d.y.toFixed(2):'--';
+        document.getElementById('z').textContent=d.z!==null?d.z.toFixed(2):'--';
         document.getElementById('px').textContent=d.px!==null?d.px.toFixed(2):'--';
         document.getElementById('py').textContent=d.py!==null?d.py.toFixed(2):'--';
         document.getElementById('pz').textContent=d.pz!==null?d.pz.toFixed(2):'--';
@@ -127,7 +127,7 @@ _HTML_PAGE = """<!DOCTYPE html>
     // --- CALIBRATION ---
     var calOpen = false;
     var calPts = {left:[], right:[]};
-    var CAM_W = 1280, CAM_H = 800;
+    var CAM_W = 640, CAM_H = 400;
     var CORNER_LABELS = ['top-left','top-right','bottom-right','bottom-left'];
 
     function toggleCal(){
@@ -160,14 +160,22 @@ _HTML_PAGE = """<!DOCTYPE html>
       var phtml = '';
       pts.forEach(function(p,i){ phtml += CORNER_LABELS[i]+': ('+p[0]+', '+p[1]+')<br>'; });
       document.getElementById(pre+'pts').innerHTML = phtml;
-      if(pts.length === 4){
-        var flat = pts.map(function(p){return p[0]+','+p[1];}).join(',');
-        document.getElementById(pre+'roi').innerHTML =
-          'Copy into marty_gui.py <b>ball_detector_'+side+'</b>:<br>' +
-          '<code style="user-select:all;">-p table_roi:="['+flat+']"</code>';
-      } else {
-        document.getElementById(pre+'roi').innerHTML = '';
-      }
+      if(pts.length === 4){ applyRoi(side); }
+    }
+
+    function applyRoi(side){
+      var pts = calPts[side];
+      if(pts.length !== 4) return;
+      var flat = pts.reduce(function(a,p){return a.concat(p);}, []);
+      var body = {}; body[side] = flat;
+      var st = document.getElementById((side==='left'?'l':'r')+'apply-status');
+      st.style.color='#ff0'; st.textContent='applying...';
+      fetch('/api/set_roi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+        .then(function(r){return r.json();}).then(function(res){
+          var r = res[side];
+          if(r && r.ok){ st.style.color='#0f0'; st.textContent='\u2713 applied'; }
+          else { st.style.color='#f55'; st.textContent='\u2717 '+(r?r.msg:'failed'); }
+        }).catch(function(){ st.style.color='#f55'; st.textContent='\u2717 error'; });
     }
 
     function captureNetZ(){
@@ -271,7 +279,7 @@ def draw_axis_indicator(frame):
 class WebStreamer:
     def __init__(self):
         self._frames = {'left': None, 'right': None}
-        self._stats = {'x':0.0, 'y':0.0, 'z':0.0, 'px':None, 'py':None, 'pz':None, 'land_x':None, 'land_z':None}
+        self._stats = {'x':None, 'y':None, 'z':None, 'px':None, 'py':None, 'pz':None, 'land_x':None, 'land_z':None}
         self._topic_data = {}  # topic -> {type, last_t, values}
         self._app = Flask(__name__)
         logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -298,6 +306,28 @@ class WebStreamer:
                 age_ms = int((now - d['last_t']) * 1000) if d.get('last_t') else None
                 out[name] = {'type': d['type'], 'age_ms': age_ms, 'values': d['values']}
             return Response(json.dumps(out), mimetype='application/json')
+
+        @self._app.route('/api/set_roi', methods=['POST'])
+        def set_roi():
+            data = request.get_json()
+            nodes = {'left': '/ball_detector_left', 'right': '/ball_detector_right'}
+            results = {}
+            for side, node in nodes.items():
+                pts = data.get(side)
+                if not pts or len(pts) != 8:
+                    continue
+                val = '[' + ','.join(str(v) for v in pts) + ']'
+                try:
+                    r = subprocess.run(
+                        ['ros2', 'param', 'set', node, 'table_roi', val],
+                        capture_output=True, text=True, timeout=8)
+                    results[side] = {'ok': r.returncode == 0,
+                                     'msg': r.stdout.strip() or r.stderr.strip() or 'ok'}
+                except subprocess.TimeoutExpired:
+                    results[side] = {'ok': False, 'msg': f'timeout — is {node} running?'}
+                except Exception as e:
+                    results[side] = {'ok': False, 'msg': str(e)}
+            return Response(json.dumps(results), mimetype='application/json')
 
         @self._app.route('/api/set_net_z', methods=['POST'])
         def set_net_z():
@@ -326,7 +356,7 @@ class SystemLauncher(threading.Thread):
         cmd_b = """export ROS_DOMAIN_ID=42; export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; export CYCLONEDDS_URI=file:///tmp/cyc_b.xml
         source /opt/ros/humble/setup.bash && source /home/capstone-nano2/Sensors/tabletennistrainer_ws/install/setup.bash
         ros2 launch ttt_bringup camera_right.launch.py &
-        ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_right -p camera_id:=right -p show_window:=false -p min_radius:=4 -p max_radius:=25 -p min_circularity:=0.65 -p motion_threshold:=30 -p dilate_iters:=2 -p min_brightness:=200 -p edge_margin:=25 &
+        ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_right -p camera_id:=right -p min_area:=8 -p max_area:=2000 -p motion_threshold:=15 -p min_contrast:=25 -p dilate_iters:=1 -p edge_margin:=10 -p table_roi:="[304,67,538,129,446,378,128,176]" &
         wait"""
         with open('/tmp/lb.sh', 'w') as f: f.write(cmd_b)
         subprocess.Popen("bash /tmp/lb.sh", shell=True)
@@ -340,7 +370,7 @@ class SystemLauncher(threading.Thread):
         ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 robot_base root --ros-args -r __node:=robot_base_to_root &
         ros2 run ttt_calibration tf_broadcaster_node --ros-args --params-file /home/capstone-nano1/Sensors/tabletennistrainer_ws/src/ttt_calibration/config/stereo_extrinsic.yaml &
         ros2 launch ttt_bringup camera_left.launch.py &
-        ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_left -p camera_id:=left -p show_window:=false -p min_radius:=4 -p max_radius:=25 -p min_circularity:=0.65 -p motion_threshold:=30 -p dilate_iters:=2 -p min_brightness:=200 -p edge_margin:=25 &
+        ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_left -p camera_id:=left -p min_area:=8 -p max_area:=2000 -p motion_threshold:=15 -p min_contrast:=25 -p dilate_iters:=1 -p edge_margin:=10 -p table_roi:="[110,187,327,84,518,166,239,397]"&
         ros2 run ttt_stereo stereo_node --ros-args -p fx:=448.2 -p fy:=400.0 -p cx:=640.0 -p cy:=400.0 &
         ros2 run ttt_trajectory trajectory_node --ros-args -p net_z:=-0.227 &
         wait
