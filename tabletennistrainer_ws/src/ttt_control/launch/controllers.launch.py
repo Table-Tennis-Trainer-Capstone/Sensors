@@ -38,6 +38,6 @@ def generate_launch_description():
         Node(
             package="controller_manager",
             executable="spawner",
-            arguments=["arm_controller", "--controller-manager", "/controller_manager"],
+            arguments=["armgroup_controller", "--controller-manager", "/controller_manager"],
         ),
     ])

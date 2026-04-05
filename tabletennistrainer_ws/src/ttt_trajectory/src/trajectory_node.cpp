@@ -5,7 +5,7 @@
 #include <cmath>
 #include <numeric>
 
-// ── Stamped 3D sample ────────────────────────────────────────────────────────
+// Stamped 3D sample
 struct Sample {
     double x, y, z;
     double t;      // seconds, relative to first sample in buffer
@@ -16,7 +16,7 @@ class TrajectoryNode : public rclcpp::Node {
 public:
     TrajectoryNode() : Node("trajectory_node") {
 
-        // ── Parameters ───────────────────────────────────────────────────────
+
         this->declare_parameter("lookahead_ms",       200);
         this->declare_parameter("min_samples",          4);
         this->declare_parameter("max_samples",         10);
@@ -71,13 +71,12 @@ private:
     void positionCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
         double t_abs = rclcpp::Time(msg->header.stamp).seconds();
 
-        // 0. SPATIAL PRE-FILTER: Ignore anything physically beyond the tracking limit 
-        // (Completely starves out the user/paddle standing behind the table)
+        // SPATIAL PRE-FILTER: Ignore anything physically beyond the tracking limit 
         if (msg->point.z > max_track_z_) {
             return;
         }
 
-        // 1. CONTINUITY CHECK: If tracking drops for >200ms, assume it's a new stroke and wipe the buffer.
+        // CONTINUITY CHECK: If tracking drops for >200ms, assume it's a new stroke and wipe the buffer.
         if (!buffer_.empty() && (t_abs - buffer_.back().t_abs > 0.2)) {
             RCLCPP_INFO(this->get_logger(), "Tracking gap > 200ms. Resetting trajectory buffer.");
             buffer_.clear();
@@ -102,7 +101,7 @@ private:
             despike_strikes_ = 0;
         }
 
-        // 1b. DESPIKE PRE-FILTER: Prevent impossible tracking jumps from corrupting the buffer.
+        // DESPIKE PRE-FILTER: Prevent impossible tracking jumps from corrupting the buffer.
         // Protects the historical arc if the vision system accidentally flashes onto background noise.
         if (!buffer_.empty()) {
             double dt = t_abs - buffer_.back().t_abs;
@@ -156,19 +155,19 @@ private:
         double vz, z0;
         fitParabolic(ts, zs, -gravity_z_, z0, vz); 
 
-        // 2. DIRECTION CHECK: Is the ball moving towards MARTY fast enough?
+        // DIRECTION CHECK: Is the ball moving towards MARTY fast enough?
         // (vz must be negative, and the magnitude must be > min_speed_)
         if (vz > -min_speed_) {
             // Ball is either moving away (outgoing shot) or rolling too slowly.
             return;
         }
 
-        // 2a. MAX VELOCITY CHECK: Reject teleporting noise blobs
+        // MAX VELOCITY CHECK: Reject teleporting noise blobs
         if (std::abs(vz) > max_velocity_) {
             return;
         }
 
-        // 2b. STRICT DISPLACEMENT & TIME CHECK: Filter out Z-noise and slow dribbles.
+        // STRICT DISPLACEMENT & TIME CHECK: Filter out Z-noise and slow dribbles.
         // The ball must have dropped a certain amount of Z in a certain time.
         double z_drop = buffer_.front().z - buffer_.back().z;
         double dt_total = buffer_.back().t - buffer_.front().t;
@@ -180,14 +179,12 @@ private:
             return;
         }
 
-        // 3. ORIGIN CHECK: Did this shot come from across the net?
+        // ORIGIN CHECK: Did this shot come from across the net?
         if (!originated_across_net_) {
             // Ball is moving towards MARTY, but it started deep on MARTY's side 
             // (e.g., dribbling backward or rolling). Ignore it.
             return;
         }
-
-        // --- If we pass all checks, the ball is a valid incoming shot! ---
 
         // Fit X and Y
         double vx, x0;
@@ -196,7 +193,7 @@ private:
         double vy, y0;
         fitParabolic(ts, ys, gravity_y_, y0, vy);
 
-        // 4. SANITY CHECK: Are the fitted lateral/vertical speeds physically possible?
+        // SANITY CHECK: Are the fitted lateral/vertical speeds physically possible?
         if (std::abs(vx) > max_velocity_ || std::abs(vy) > max_velocity_) {
             return;
         }
@@ -206,7 +203,7 @@ private:
         auto landing = findLanding(x0, vx, y0, vy, z0, vz, t_now);
         if (landing.has_value()) {
             
-            // 5. LANDING BOUNDS CHECK: Reject trajectories that land in another timezone
+            // LANDING BOUNDS CHECK: Reject trajectories that land in another timezone
             // (Table width is +/-0.76m. Robot base is at Z=-1.4732m. If it lands behind the robot or way off side, ignore it)
             if (std::abs(landing->x) > 1.5 || landing->z < -1.48 || landing->z > 2.0) {
                 return;
@@ -215,7 +212,7 @@ private:
             // ONLY ALLOW LANDING SPOTS ON MARTY'S SIDE OF THE NET (Z < 0)
             if (landing->z < 0.0) {
                 
-                // 6. POST-BOUNCE INTERCEPT: Target the ball X milliseconds AFTER it bounces on Marty's side!
+                // POST-BOUNCE INTERCEPT: Target the ball X milliseconds AFTER it bounces on Marty's side!
                 double t_intercept = landing->t_land + (lookahead_ms_ / 1000.0);
                 auto [px, py, pz, bounced] = predictWithBounce(x0, vx, y0, vy, z0, vz, t_now, t_intercept);
 
@@ -262,7 +259,7 @@ private:
         }
     }
 
-    // ── Linear least squares: pos = p0 + v*t ─────────────────────────────────
+    // Linear least squares: pos = p0 + v*t 
     void fitLinear(const std::vector<double>& t, const std::vector<double>& p,
                    double& p0, double& v)
     {
@@ -277,7 +274,7 @@ private:
         p0 = (sum_p - v * sum_t) / n;
     }
 
-    // ── Parabolic fit: pos = p0 + v*t - 0.5*gcomp*t² ─────────────────────────
+    // Parabolic fit: pos = p0 + v*t - 0.5 * gcomp * t^2
     void fitParabolic(const std::vector<double>& t, const std::vector<double>& p,
                       double gcomp, double& p0, double& v)
     {
@@ -287,7 +284,7 @@ private:
         fitLinear(t, corrected, p0, v);
     }
 
-    // ── Predict position, handling one bounce ─────────────────────────────────
+    // Predict position, handling one bounce
     struct PredResult { double x, y, z; bool bounced; };
 
     PredResult predictWithBounce(
@@ -326,7 +323,7 @@ private:
         return {px, py, pz, false};
     }
 
-    // ── Find next table landing point ─────────────────────────────────────────
+    // Find next table landing point
     struct LandingResult { double x, z, t_land; };
 
     std::optional<LandingResult> findLanding(
@@ -354,8 +351,7 @@ private:
             t_land
         };
     }
-
-    // ── Members ───────────────────────────────────────────────────────────────
+    
     int lookahead_ms_, min_samples_, max_samples_;
     double gravity_, gravity_y_, gravity_z_;
     double table_y_, restitution_, net_z_;

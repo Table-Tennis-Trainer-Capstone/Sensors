@@ -1,16 +1,16 @@
 # This config file is used by ros2_control
 controller_manager:
   ros__parameters:
-    update_rate: 100  # Hz
+    update_rate: 100
+    use_sim_time: false
 
-    arm_controller:
+    armgroup_controller:
       type: joint_trajectory_controller/JointTrajectoryController
-
 
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-arm_controller:
+armgroup_controller:
   ros__parameters:
     joints:
       - BaseRotate_0
@@ -23,4 +23,14 @@ arm_controller:
     state_interfaces:
       - position
       - velocity
-    allow_nonzero_velocity_at_trajectory_end: true
+    use_sim_time: false
+
+joint_state_broadcaster:
+  ros__parameters:
+    joints:
+      - BaseRotate_0
+      - UpperArmRotate_0
+      - ForeArmRotate_0
+      - WristRotate_0
+      - PaddleRotate_0
+    use_sim_time: false

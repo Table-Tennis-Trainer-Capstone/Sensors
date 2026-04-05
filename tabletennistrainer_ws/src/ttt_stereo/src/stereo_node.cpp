@@ -130,7 +130,7 @@ private:
         double raw_y = (s * dl_y + t * dr_y) / 2.0;
         double raw_z = (s * dl_z + t * dr_z) / 2.0;
 
-        // --- 0. GHOST POINT FILTER (Ray Miss Distance) ---
+        // GHOST POINT FILTER (Ray Miss Distance)
         // If the cameras detected two different background objects, their rays won't physically intersect
         double pL_x = s * dl_x;
         double pL_y = s * dl_y;
@@ -142,25 +142,25 @@ private:
         
         double ray_miss_dist = std::sqrt(std::pow(pL_x - pR_x, 2) + std::pow(pL_y - pR_y, 2) + std::pow(pL_z - pR_z, 2));
         
-        // If rays miss each other by more than 25cm, they are looking at different things! (Ghost point)
+        // If rays miss each other by more than 25cm, they are looking at different things (Ghost point)
         if (ray_miss_dist > 0.25) {
             return;
         }
 
-        // --- THE TRIPLE ORIGIN SHIFT ---
-        // 1. Center X (Table Center = 0)
+        // TRIPLE ORIGIN SHIFT
+        // Center X (Table Center = 0)
         double out_x = raw_x - (baseline_ / 2.0);
 
-        // 2. Center Y (Table Surface = 0). 
+        // Center Y (Table Surface = 0). 
         // Camera Y is positive down. Subtracting from cam height makes 'up' positive.
         double cam_h = this->get_parameter("height_m").as_double();
         double out_y = cam_h - raw_y;
 
-        // 3. Center Z (Net = 0)
+        // Center Z (Net = 0)
         double net_z = this->get_parameter("net_dist_m").as_double();
         double out_z = raw_z - net_z;
 
-        // --- 4. 3D WORKSPACE BOUNDING BOX ---
+        // BOUNDING BOX
         // Reject background lights and noise that triangulate outside the play area
         double lim_x   = this->get_parameter("limit_x_m").as_double();
         double lim_y_t = this->get_parameter("limit_y_top_m").as_double();

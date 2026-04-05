@@ -134,8 +134,9 @@ def generate_launch_description():
             executable='control_node',
             name='ttt_control_node',
             parameters=[{
-                'update_rate_hz': 10.0,
-                'planning_time_s': 0.05,
+                'update_rate_hz':  PARAMS['update_rate_hz'],
+                'planning_time_s': PARAMS['planning_time_s'],
+                'return_delay_ms': PARAMS['return_delay_ms'],
             }],
             output='screen'
         ),

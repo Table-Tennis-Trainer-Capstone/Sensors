@@ -140,6 +140,9 @@ private:
             std::vector<int64_t> roi_param;
             for (const auto& pt : hull) { roi_param.push_back(pt.x); roi_param.push_back(pt.y); }
             this->set_parameter(rclcpp::Parameter("table_roi", roi_param));
+            RCLCPP_INFO(this->get_logger(),
+                "[%s] Table auto-detected: %zu corners, %.0f%% of frame — ROI locked",
+                camera_id_.c_str(), hull.size(), 100.0 * ca / frame_area);
             return;
         }
     }
@@ -184,10 +187,10 @@ private:
                 return; // Fill buffer phase
             }
             
-            // 1. Motion Differencing
+            // Motion Differencing
             cv::cuda::subtract(gpu_blurred_, history_ring_[history_idx_], gpu_diff_);
             cv::cuda::threshold(gpu_diff_, gpu_motion_, motion_threshold_, 255, cv::THRESH_BINARY);
-            // 2. Brightness Masking (Only allow moving objects that are ALSO currently bright)
+            // Brightness Masking (Only allow moving objects that are ALSO currently bright)
             cv::cuda::threshold(gpu_blurred_, gpu_mask_current_, min_contrast_, 255, cv::THRESH_BINARY);
             cv::cuda::bitwise_and(gpu_motion_, gpu_mask_current_, gpu_motion_);
 
