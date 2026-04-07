@@ -23,7 +23,7 @@ public:
     TrajectoryNode() : Node("trajectory_node") {
         // ── Parameters ────────────────────────────────────────────────────────
         this->declare_parameter("lookahead_ms",      200);
-        this->declare_parameter("max_samples",        15);
+        this->declare_parameter("max_samples",        40);
         this->declare_parameter("gravity",           9.81);
         this->declare_parameter("table_y",            0.0);
         this->declare_parameter("restitution",        0.85);
@@ -135,6 +135,7 @@ private:
         despike_strikes_ = 0;
         has_pred_ = false; has_land_ = false;
         pred_locked_ = false; land_locked_ = false;
+        s3_count_ = 0;
         publishPhase();
     }
 
@@ -158,15 +159,16 @@ private:
         double t_abs = rclcpp::Time(msg->header.stamp).seconds();
         double bx=msg->point.x, by=msg->point.y, bz=msg->point.z;
 
-        // Ignore points physically beyond table end
+        // Ignore points physically beyond table end or well past robot
         if (bz > max_track_z_) return;
+        if (bz < -0.5) return;  // ball rolled past robot, ignore
 
         // Gap > 200 ms ⇒ new rally
         if (!buffer_.empty() && (t_abs - buffer_.back().t_abs > 0.2))
             resetBuffer("tracking gap >200ms");
 
         // Ball touched table surface ⇒ bounce, new arc
-        if (by < table_y_ + 0.05) {
+        if (by < table_y_ + 0.02) {
             resetBuffer("bounce detected");
             return;
         }
@@ -177,10 +179,10 @@ private:
         // Track net crossing (opponent's side → MARTY's side)
         if (!ball_crossed_net_ && originated_across_net_ && bz < 0.0) {
             ball_crossed_net_ = true;
-            // Snap EMA so Stage 3 locks onto first crossing prediction immediately
-            has_pred_ = false; has_land_ = false;
+            // Keep the EMA warm — Stage 3 refines from whatever Stage 2 settled on
             pred_locked_ = false; land_locked_ = false;
-            RCLCPP_INFO(this->get_logger(), "Ball crossed net → STAGE 3");
+            s3_count_ = 0;
+            RCLCPP_INFO(this->get_logger(), "Ball crossed net → STAGE 3 | carrying EMA fwd");
         }
 
         // Despike
@@ -203,9 +205,18 @@ private:
         if ((int)buffer_.size() > max_samples_) buffer_.pop_front();
 
         // ── Build fit vectors ─────────────────────────────────────────────────
+        // In Stage 3 use only the most recent samples (ball close to landing):
+        // the early far-side samples skew the parabola and cause overshoot.
+        // For S1/S2 use all buffered samples to capture the full launch arc.
+        static constexpr int S3_FIT_WINDOW = 15;
+        size_t fit_start = 0;
+        if (ball_crossed_net_ && (int)buffer_.size() > S3_FIT_WINDOW)
+            fit_start = buffer_.size() - S3_FIT_WINDOW;
+
         std::vector<double> ts, xs, ys, zs;
-        double t_off = buffer_.front().t;
-        for (const auto& s : buffer_) {
+        double t_off = buffer_[fit_start].t;
+        for (size_t i = fit_start; i < buffer_.size(); i++) {
+            const auto& s = buffer_[i];
             ts.push_back(s.t - t_off);
             xs.push_back(s.x); ys.push_back(s.y); zs.push_back(s.z);
         }
@@ -234,14 +245,21 @@ private:
             return; // not enough samples yet
 
         if (new_stage != stage_) {
+            PredStage prev_stage = stage_;
             stage_ = new_stage;
-            // Snap EMA to first value at each stage transition
-            has_pred_ = false; has_land_ = false;
+            // Carry forward EMA estimates from the previous stage as a warm start.
+            // Stage 1 captures the best launch-angle data (full arc, ball near opponent);
+            // resetting here discards that and forces Stage 2/3 to re-fit from a
+            // shorter mid-trajectory window that has already lost the early geometry.
+            // Only reset if regressing to IDLE (covered by resetBuffer).
             pred_locked_ = false; land_locked_ = false;
-            RCLCPP_INFO(this->get_logger(), "→ STAGE %d (n=%d, Vz=%.2f m/s)",
+            s3_count_ = 0;
+            (void)prev_stage;
+            RCLCPP_INFO(this->get_logger(), "→ STAGE %d (n=%d, Vz=%.2f m/s) | carrying EMA fwd",
                         static_cast<int>(stage_), n, vz);
             publishPhase();
         }
+        if (stage_ == PredStage::STAGE3) s3_count_++;
 
         // ── Fit X, Y ─────────────────────────────────────────────────────────
         double vx, x0; fitLinear(ts, xs, x0, vx);
@@ -258,13 +276,30 @@ private:
         if (std::abs(land->x) > 1.5 || land->z < -1.5) return;
 
         // ── Landing EMA ───────────────────────────────────────────────────────
+        // Lock once we have a confident estimate so that late-trajectory samples
+        // (near the net, where the rolling window loses the far-end launch angle)
+        // cannot drift the prediction toward the net.
         double la = landAlpha();
         if (!has_land_) {
             sl_x_=land->x; sl_z_=land->z; has_land_=true;
-            if (stage_ == PredStage::STAGE3) land_locked_ = true;
         } else if (!land_locked_) {
             sl_x_ = la*land->x + (1-la)*sl_x_;
             sl_z_ = la*land->z + (1-la)*sl_z_;
+        }
+
+        // Lock landing:
+        //   S2: once we have 20 samples (enough arc for accurate parabola fit,
+        //       still early enough that the buffer hasn't dropped the launch angle)
+        //   S3: after 4 post-net frames so Stage 3 can refine from Stage 2 first
+        if (!land_locked_) {
+            bool lock_s2 = (stage_ == PredStage::STAGE2 && n >= 20);
+            bool lock_s3 = (stage_ == PredStage::STAGE3 && s3_count_ >= 4);
+            if (lock_s2 || lock_s3) {
+                land_locked_ = true;
+                RCLCPP_INFO(this->get_logger(),
+                    "Landing LOCKED at Stage%d (n=%d, s3_count=%d) → X:%+.3f Z:%.3f",
+                    static_cast<int>(stage_), n, s3_count_, sl_x_, sl_z_);
+            }
         }
 
         auto lmsg = geometry_msgs::msg::PointStamped();
@@ -316,6 +351,7 @@ private:
 
     bool has_pred_ = false, has_land_ = false;
     bool pred_locked_ = false, land_locked_ = false;
+    int s3_count_ = 0;
     double sp_x_=0, sp_y_=0, sp_z_=0;
     double sl_x_=0, sl_z_=0;
 

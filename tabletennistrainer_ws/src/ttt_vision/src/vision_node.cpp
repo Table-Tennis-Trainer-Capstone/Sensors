@@ -159,18 +159,24 @@ private:
 
         if (!table_roi_.empty() && (roi_mask_.empty() || roi_mask_.size() != img.size())) {
             roi_mask_ = cv::Mat::zeros(img.size(), CV_8UC1);
+            // Extend the table polygon to the full image height so the ball is
+            // tracked at any elevation (in the air above or below the table surface)
+            // while still staying within the table's left-right (X) extent.
             std::vector<cv::Point> extended_roi = table_roi_;
-            for (const auto& pt : table_roi_) extended_roi.push_back(cv::Point(pt.x, 0));
+            for (const auto& pt : table_roi_) {
+                extended_roi.push_back(cv::Point(pt.x, 0));             // top of image
+                extended_roi.push_back(cv::Point(pt.x, img.rows - 1)); // bottom of image
+            }
             std::vector<cv::Point> extended_hull;
             cv::convexHull(extended_roi, extended_hull);
             cv::fillPoly(roi_mask_, std::vector<std::vector<cv::Point>>{extended_hull}, 255);
             
-            // Erode the ROI mask to physically shrink the tracking zone INSIDE the table's white lines
-            if (edge_margin_ > 0) {
-                int k_size = edge_margin_ * 2 + 1;
-                cv::Mat roi_erode = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(k_size, k_size));
-                cv::erode(roi_mask_, roi_mask_, roi_erode);
-            }
+            // DILATE the ROI mask to expand the tracking zone OUTSIDE the white lines.
+            // This ensures we catch fast balls that fly slightly wide of the table edges!
+            int k_size = 21;
+            cv::Mat roi_dilate = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(k_size, k_size));
+            cv::dilate(roi_mask_, roi_mask_, roi_dilate);
+
             gpu_roi_mask_.upload(roi_mask_);
         }
 
@@ -221,7 +227,7 @@ private:
 
             // Reject highly elongated shapes (like sweeping arms and paddles)
             float aspect_ratio = static_cast<float>(bbox.width) / bbox.height;
-            if (aspect_ratio < 0.20f || aspect_ratio > 5.0f) continue; // Trimmed slightly to reject thin edge-glare lines
+            if (aspect_ratio < 0.4f || aspect_ratio > 2.5f) continue; // Highly strict: blurred balls rarely exceed 1.5:1
 
             // Circularity check: Ping pong balls are round, sweeping paddle edges are jagged lines
             double contour_area = cv::contourArea(contour);
@@ -231,7 +237,7 @@ private:
             // Tiny distant balls (<16px area) are just pixelated squares and will fail math checks!
             if (perimeter > 0.0 && bbox_area >= 16.0) {
                 circularity = 4.0 * CV_PI * contour_area / (perimeter * perimeter);
-                if (circularity < 0.20) continue; // Trimmed slightly
+                if (circularity < 0.55) continue; // Strict: blurred balls are ~0.8, jagged lines are <0.4
             }
 
             cv::Point2f center(bbox.x + bbox.width / 2.0f, bbox.y + bbox.height / 2.0f);

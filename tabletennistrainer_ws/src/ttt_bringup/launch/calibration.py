@@ -13,12 +13,12 @@ PARAMS = {
     'fps':                 240,
 
     # ── Ball Detection (vision_node) ──────────────────────────────────────────
-    'min_area':               16,
+    'min_area':               20,   # Ignore tiny 4x5 pixel noise fragments
     'max_area':             295,  # Tightened: ball is rarely >200px area. Rejects paddles/hands.
-    'motion_threshold':     15,   # Increased: Rejects faint shadows and background sensor grain
-    'min_contrast':         60,   # Increased: Forces moving objects to be distinctly bright
+    'motion_threshold':     12,   # Bumped slightly to reject micro-vibrations on the white lines
+    'min_contrast':         55,   # Slightly raised to ignore faint reflection noise
     'dilate_iters':          1,
-    'edge_margin':          30,   # Increased: Ignores the outer 30px boundary of the lens to prevent glare tracking
+    'edge_margin':          10,   # Reduced: Reclaims the outer edges of the camera lens
     'kf_gate_px':          120.0, # Widened slightly: Allows the tracker to follow faster sudden movements
     'kf_process_noise':     0.08, # Increased: Reduces smoothing inertia so the tracker feels "snappy" again
     'table_roi_left':     [153, 157, 388, 81, 569, 194, 253, 395],
@@ -51,7 +51,7 @@ PARAMS = {
     'lookahead_ms':        150,   # How far AFTER the bounce to intercept the ball (ms)
     'stage1_min_samples':    3,   # STAGE 1: Fast initial direction (3 samples @ 240fps = 12ms)
     'stage2_min_samples':    8,   # STAGE 2: Smoothed tracking (8 samples @ 240fps = 33ms)
-    'max_samples':          15,   # Reduced: 15 samples @ 240fps = ~62ms. Less lag when recalculating arcs.
+    'max_samples':          60,   # Reduced: 15 samples @ 240fps = ~62ms. Less lag when recalculating arcs.
     'gravity':            9.81,   # m/s^2
     'table_y':             0.0,   # Y coordinate of table surface (0 = table surface is Y=0)
     'camera_tilt_deg':     0.0,   # Camera tilt correction (leave 0 unless cameras are angled)
@@ -59,7 +59,7 @@ PARAMS = {
     'min_incoming_speed':  0.5,   # MIN SPEED: Ignore shots slower than 0.5 m/s
     'net_margin_z':       -0.2,   # ORIGIN GATE: Shot must have crossed Z > -0.2m
     'max_track_z':         1.5,   # END OF TABLE: Ignore noise beyond this Z depth
-    'max_velocity':        25.0,  # SPEED LIMIT: Ignore tracking jumps > 25 m/s (~56mph)
+    'max_velocity':        18.0,  # SPEED LIMIT: Ignore tracking jumps > 18 m/s (~40mph, pro TT top speed)
 
     # ── Arm Control (control_node) ────────────────────────────────────────────
     'update_rate_hz':     60.0,   # How often the control loop checks for new ball targets
