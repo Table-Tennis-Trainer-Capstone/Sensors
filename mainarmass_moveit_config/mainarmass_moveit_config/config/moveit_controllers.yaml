@@ -1,0 +1,14 @@
+moveit_simple_controller_manager:
+  controller_names:
+    - armgroup_controller
+
+  armgroup_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory  # <--- CRITICAL ADDITION
+    default: true                       # <--- ADD THIS
+    joints:
+      - BaseRotate_0
+      - UpperArmRotate_0
+      - ForeArmRotate_0
+      - WristRotate_0
+      - PaddleRotate_0

@@ -1,0 +1,8 @@
+# Default initial positions for mainarmass's ros2_control fake system
+
+initial_positions:
+  BaseRotate_0: 0
+  ForeArmRotate_0: 0
+  PaddleRotate_0: 0
+  UpperArmRotate_0: 0
+  WristRotate_0: 0

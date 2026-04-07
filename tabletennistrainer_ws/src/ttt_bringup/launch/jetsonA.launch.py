@@ -83,6 +83,8 @@ def generate_launch_description():
                 'min_contrast': PARAMS['min_contrast'],
                 'dilate_iters': PARAMS['dilate_iters'],
                 'edge_margin': PARAMS['edge_margin'],
+                'kf_gate_px': PARAMS.get('kf_gate_px', 250.0),
+                'kf_process_noise': PARAMS.get('kf_process_noise', 0.05),
                 **({'table_roi': PARAMS['table_roi_left']} if PARAMS['table_roi_left'] else {}),
             }],
             output='screen'
@@ -113,7 +115,8 @@ def generate_launch_description():
             name='trajectory_node',
             parameters=[{
                 'lookahead_ms': PARAMS['lookahead_ms'],
-                'min_samples': PARAMS['min_samples'],
+            'stage1_min_samples': PARAMS.get('stage1_min_samples', 3),
+            'stage2_min_samples': PARAMS.get('stage2_min_samples', 8),
                 'max_samples': PARAMS['max_samples'],
                 'gravity': PARAMS['gravity'],
                 'camera_tilt_deg': PARAMS['camera_tilt_deg'],

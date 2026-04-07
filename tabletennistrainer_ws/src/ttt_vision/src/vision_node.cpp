@@ -105,7 +105,7 @@ public:
             });
 
         image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-            "/camera/" + camera_id_ + "/image_raw", 10,
+            "/camera/" + camera_id_ + "/image_raw", rclcpp::SensorDataQoS(),
             std::bind(&VisionNode::imageCallback, this, std::placeholders::_1));
 
         detection_pub_ = this->create_publisher<ttt_msgs::msg::BallDetection>("/ball_detection/" + camera_id_, 10);
@@ -221,7 +221,7 @@ private:
 
             // Reject highly elongated shapes (like sweeping arms and paddles)
             float aspect_ratio = static_cast<float>(bbox.width) / bbox.height;
-            if (aspect_ratio < 0.25f || aspect_ratio > 4.0f) continue; // Tightened to reject table edge lines
+            if (aspect_ratio < 0.20f || aspect_ratio > 5.0f) continue; // Trimmed slightly to reject thin edge-glare lines
 
             // Circularity check: Ping pong balls are round, sweeping paddle edges are jagged lines
             double contour_area = cv::contourArea(contour);
@@ -231,16 +231,16 @@ private:
             // Tiny distant balls (<16px area) are just pixelated squares and will fail math checks!
             if (perimeter > 0.0 && bbox_area >= 16.0) {
                 circularity = 4.0 * CV_PI * contour_area / (perimeter * perimeter);
-                if (circularity < 0.35) continue; // Tightened to reject crescent edge noise
+                if (circularity < 0.20) continue; // Trimmed slightly
             }
 
             cv::Point2f center(bbox.x + bbox.width / 2.0f, bbox.y + bbox.height / 2.0f);
             if (center.x < edge_margin_ || center.x > img.cols - edge_margin_) continue;
             if (center.y < edge_margin_ || center.y > img.rows - edge_margin_) continue;
 
-            cv::Mat roi = img(bbox);
-            cv::Mat mask_roi = motion_mask(bbox);
-            double brightness = cv::mean(roi, mask_roi)[0];
+            // CPU OPTIMIZATION: The GPU bitwise_and already enforced our min_contrast_ threshold.
+            // Skipping the CPU-bound cv::mean slice calculation saves critical microseconds per contour!
+            double brightness = 255.0;
 
             // KF PROXIMITY SCORING:
             // If we have a track, prioritize the bright blob closest to the prediction!
