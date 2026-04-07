@@ -28,7 +28,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, JointState
 from geometry_msgs.msg import PointStamped
-from std_msgs.msg import String
+from std_msgs.msg import String, Int32
 from ttt_msgs.msg import BallDetection
 
 import sys as _sys, re as _re
@@ -100,6 +100,15 @@ _HTML_PAGE = """<!DOCTYPE html>
     .vis-box{background:#111;border:1px solid #333;border-radius:8px;padding:10px;position:relative;flex:1;min-width:400px;}
     .vis-title{color:#0ff;font-size:12px;font-weight:bold;position:absolute;top:15px;left:15px;background:#111;padding:2px 6px;border-radius:4px;border:1px solid #0ff;}
     canvas{background:#0a0a0a;border-radius:4px;width:100%;height:350px;}
+    .tab-bar{display:flex;gap:8px;justify-content:center;margin-bottom:10px;}
+    .tab-btn{background:#222;border:1px solid #444;color:#888;padding:7px 24px;font-family:Consolas,monospace;cursor:pointer;font-size:13px;border-radius:4px;}
+    .tab-btn.active{background:#0a1a0a;border-color:#0f0;color:#0f0;}
+    .det-table{width:100%;border-collapse:collapse;font-size:11px;font-family:Consolas,monospace;}
+    .det-table th{color:#666;padding:4px 8px;border-bottom:1px solid #333;text-align:right;font-weight:normal;letter-spacing:1px;}
+    .det-table th:first-child,.det-table td:first-child{text-align:left;}
+    .det-table td{padding:4px 8px;border-bottom:1px solid #1a1a1a;text-align:right;white-space:nowrap;}
+    .det-table tr:hover td{background:#1a1a1a;}
+    .det-r{color:#ff9999;}.det-contrast{color:#ffcc55;}.det-bright{color:#aaaaff;}.det-xy{color:#888;}.det-3d{color:#55ff99;}
   </style>
 </head>
 <body>
@@ -337,25 +346,79 @@ _HTML_PAGE = """<!DOCTYPE html>
         sCtx.fillStyle = '#fff'; sCtx.beginPath(); sCtx.arc(S_Z(d.z), S_Y(d.y), 5, 0, Math.PI*2); sCtx.fill();
       }
 
+      // Draw all 3 stage landing markers independently
+      var stageDefs = [
+        {key:'s1', color:'#5588ff', r:12, label:'S1'},
+        {key:'s2', color:'#ffcc00', r:8,  label:'S2'},
+        {key:'s3', color:'#00ff80', r:5,  label:'S3'},
+      ];
+      stageDefs.forEach(function(sd) {
+        var lx = d['land_'+sd.key+'_x'], lz = d['land_'+sd.key+'_z'];
+        if(lx === null || lx === undefined || lz === null || lz === undefined) return;
+        tCtx.strokeStyle = sd.color; tCtx.lineWidth = 2;
+        tCtx.beginPath(); tCtx.arc(T_Z(lz), T_X(lx), sd.r, 0, Math.PI*2); tCtx.stroke();
+        if(sd.key === 's3') {
+          tCtx.beginPath(); tCtx.moveTo(T_Z(lz)-16, T_X(lx)); tCtx.lineTo(T_Z(lz)+16, T_X(lx)); tCtx.stroke();
+          tCtx.beginPath(); tCtx.moveTo(T_Z(lz), T_X(lx)-16); tCtx.lineTo(T_Z(lz), T_X(lx)+16); tCtx.stroke();
+        }
+        tCtx.fillStyle = sd.color; tCtx.font = 'bold 10px Consolas';
+        tCtx.fillText(sd.label, T_Z(lz)+sd.r+3, T_X(lx)+4);
+        // Side view: land on table surface (Y=0)
+        sCtx.strokeStyle = sd.color; sCtx.lineWidth = 2;
+        sCtx.beginPath(); sCtx.arc(S_Z(lz), S_Y(0), sd.r, 0, Math.PI*2); sCtx.stroke();
+        if(sd.key === 's3') {
+          sCtx.beginPath(); sCtx.moveTo(S_Z(lz)-16, S_Y(0)); sCtx.lineTo(S_Z(lz)+16, S_Y(0)); sCtx.stroke();
+          sCtx.beginPath(); sCtx.moveTo(S_Z(lz), S_Y(0)-16); sCtx.lineTo(S_Z(lz), S_Y(0)+16); sCtx.stroke();
+        }
+        sCtx.fillStyle = sd.color; sCtx.font = 'bold 10px Consolas';
+        sCtx.fillText(sd.label, S_Z(lz)+sd.r+3, S_Y(0)-4);
+      });
+
+      // 3b. Draw Predicted Trajectory Arc Graph
       if(hasPred) {
-        tCtx.fillStyle = '#ff5555'; tCtx.beginPath(); tCtx.arc(T_Z(d.pz), T_X(d.px), 4, 0, Math.PI*2); tCtx.fill();
-        sCtx.fillStyle = '#ff5555'; sCtx.beginPath(); sCtx.arc(S_Z(d.pz), S_Y(d.py), 4, 0, Math.PI*2); sCtx.fill();
+        tCtx.fillStyle = '#ff5555'; tCtx.beginPath(); tCtx.arc(T_Z(d.pz), T_X(d.px), 5, 0, Math.PI*2); tCtx.fill();
+        sCtx.fillStyle = '#ff5555'; sCtx.beginPath(); sCtx.arc(S_Z(d.pz), S_Y(d.py), 5, 0, Math.PI*2); sCtx.fill();
+
         if(hasBall) {
-          tCtx.strokeStyle = 'rgba(255,85,85,0.5)'; tCtx.beginPath(); tCtx.moveTo(T_Z(d.z), T_X(d.x)); tCtx.lineTo(T_Z(d.pz), T_X(d.px)); tCtx.stroke();
-          sCtx.strokeStyle = 'rgba(255,85,85,0.5)'; sCtx.beginPath(); sCtx.moveTo(S_Z(d.z), S_Y(d.y)); sCtx.lineTo(S_Z(d.pz), S_Y(d.py)); sCtx.stroke();
+          tCtx.strokeStyle = 'rgba(255,85,85,0.8)'; tCtx.lineWidth = 2; tCtx.setLineDash([5,5]);
+          sCtx.strokeStyle = 'rgba(255,85,85,0.8)'; sCtx.lineWidth = 2; sCtx.setLineDash([5,5]);
+
+          tCtx.beginPath(); tCtx.moveTo(T_Z(d.z), T_X(d.x));
+          sCtx.beginPath(); sCtx.moveTo(S_Z(d.z), S_Y(d.y));
+
+          // If bounce is physically between the ball and the paddle
+          if(hasLand && d.land_z < d.z && d.land_z > d.pz) {
+            tCtx.lineTo(T_Z(d.land_z), T_X(d.land_x));
+            
+            // Draw parabolic arcs for Side View (simulated gravity curve using Bezier control points)
+            let dz1 = Math.abs(d.z - d.land_z);
+            sCtx.quadraticCurveTo(S_Z((d.z + d.land_z) / 2), S_Y(Math.max(d.y, 0) + (dz1 * 0.25)), S_Z(d.land_z), S_Y(0));
+            
+            let dz2 = Math.abs(d.land_z - d.pz);
+            sCtx.quadraticCurveTo(S_Z((d.land_z + d.pz) / 2), S_Y(Math.max(0, d.py) + (dz2 * 0.25)), S_Z(d.pz), S_Y(d.py));
+          } else {
+            // Direct flight (no bounce expected)
+            let dz = Math.abs(d.z - d.pz);
+            sCtx.quadraticCurveTo(S_Z((d.z + d.pz)/2), S_Y(Math.max(d.y, d.py) + (dz * 0.15)), S_Z(d.pz), S_Y(d.py));
+          }
+          
+          tCtx.lineTo(T_Z(d.pz), T_X(d.px));
+          tCtx.stroke(); sCtx.stroke();
+          tCtx.setLineDash([]); sCtx.setLineDash([]);
         }
       }
 
-      if(hasLand) {
-        tCtx.strokeStyle = '#ffcc00'; tCtx.lineWidth=2;
-        tCtx.beginPath(); tCtx.moveTo(T_Z(d.land_z)-5, T_X(d.land_x)-5); tCtx.lineTo(T_Z(d.land_z)+5, T_X(d.land_x)+5); tCtx.stroke();
-        tCtx.beginPath(); tCtx.moveTo(T_Z(d.land_z)-5, T_X(d.land_x)+5); tCtx.lineTo(T_Z(d.land_z)+5, T_X(d.land_x)-5); tCtx.stroke();
-        
-        if(hasPred) {
-          sCtx.strokeStyle = 'rgba(255,204,0,0.5)'; sCtx.setLineDash([4,4]);
-          sCtx.beginPath(); sCtx.moveTo(S_Z(d.pz), S_Y(d.py)); sCtx.lineTo(S_Z(d.land_z), S_Y(0)); sCtx.stroke();
-          sCtx.setLineDash([]);
-        }
+      // Stage indicator badge
+      var phase = d.phase || 0;
+      if(phase > 0) {
+        var stageColors = ['','#5588ff','#ffcc00','#00ff80'];
+        var stageNames  = ['','STAGE 1','STAGE 2','STAGE 3'];
+        tCtx.fillStyle = stageColors[phase] || '#888';
+        tCtx.font = 'bold 13px Consolas';
+        tCtx.fillText(stageNames[phase] || '', 10, 18);
+        sCtx.fillStyle = stageColors[phase] || '#888';
+        sCtx.font = 'bold 13px Consolas';
+        sCtx.fillText(stageNames[phase] || '', 10, 18);
       }
 
       // 4. Draw Robot Arm
@@ -461,7 +524,7 @@ _HTML_PAGE = """<!DOCTYPE html>
     var _latestStats = {};
     function poll(){
       fetch('/api/stats').then(r=>r.json()).then(d=>{ _latestStats=d; }).catch(()=>{});
-      setTimeout(poll, 16);
+      setTimeout(poll, 8);
     }
     function renderLoop(){
       drawVisualizations(_latestStats);
@@ -1127,8 +1190,9 @@ def draw_axis_indicator(frame):
 class WebStreamer:
     def __init__(self):
         self._frames = {'left': None, 'right': None}
-        self._stats = {'x':None, 'y':None, 'z':None, 'px':None, 'py':None, 'pz':None, 'land_x':None, 'land_z':None, 
-                       'det_l_x':None, 'det_l_y':None, 'det_r_x':None, 'det_r_y':None, 'trail':[], 'joints':{}}
+        self._stats = {'x':None, 'y':None, 'z':None, 'px':None, 'py':None, 'pz':None, 'land_x':None, 'land_z':None,
+                       'land_s1_x':None, 'land_s1_z':None, 'land_s2_x':None, 'land_s2_z':None, 'land_s3_x':None, 'land_s3_z':None,
+                       'det_l_x':None, 'det_l_y':None, 'det_r_x':None, 'det_r_y':None, 'trail':[], 'joints':{}, 'phase':0}
         self._topic_data = {}
         self.traj_logs = []
 
@@ -1330,11 +1394,6 @@ class WebStreamer:
                 try: subprocess.run(['ros2', 'param', 'set', node, 'max_area', str(max_area)], timeout=3)
                 except: pass
 
-            # Tilt and height to trajectory node
-            try: subprocess.run(['ros2', 'param', 'set', '/trajectory_node', 'camera_tilt_deg', "0.0"], timeout=3)
-            except: pass
-            try: subprocess.run(['ros2', 'param', 'set', '/trajectory_node', 'table_y', "0.0"], timeout=3)
-            except: pass
 
             # MERGED: use unified _save_all_to_cal
             if ok:
@@ -1393,7 +1452,7 @@ class SystemLauncher(threading.Thread):
             "export RCUTILS_CONSOLE_OUTPUT_FORMAT=\"[{severity}] [{name}]: {message}\"\n"
             "source /opt/ros/humble/setup.bash && source /home/capstone-nano2/Sensors/tabletennistrainer_ws/install/setup.bash\n"
             "ros2 launch ttt_bringup camera_right.launch.py &\n"
-            f"ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_right -p camera_id:=right -p min_area:={CAL['min_area']} -p max_area:={CAL['max_area']} -p motion_threshold:={CAL['motion_threshold']} -p min_contrast:={CAL.get('min_contrast', 100)} -p dilate_iters:={CAL['dilate_iters']} -p edge_margin:={CAL['edge_margin']} {_roi_b} &\n"
+            f"ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_right -p camera_id:=right -p min_area:={CAL['min_area']} -p max_area:={CAL['max_area']} -p motion_threshold:={CAL['motion_threshold']} -p min_contrast:={CAL.get('min_contrast', 100)} -p dilate_iters:={CAL['dilate_iters']} -p edge_margin:={CAL['edge_margin']} -p kf_gate_px:={CAL.get('kf_gate_px', 250.0)} -p kf_process_noise:={CAL.get('kf_process_noise', 0.05)} {_roi_b} &\n"
             "wait"
         )
         with open('/tmp/lb.sh', 'w') as f: f.write(cmd_b)
@@ -1414,7 +1473,7 @@ class SystemLauncher(threading.Thread):
             "ros2 launch ttt_bringup camera_left.launch.py &\n"
             
             # Vision Node
-            f"ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_left -p camera_id:=left -p min_area:={CAL['min_area']} -p max_area:={CAL['max_area']} -p motion_threshold:={CAL['motion_threshold']} -p min_contrast:={CAL.get('min_contrast', 100)} -p dilate_iters:={CAL['dilate_iters']} -p edge_margin:={CAL['edge_margin']} {_roi_a} &\n"
+            f"ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_left -p camera_id:=left -p min_area:={CAL['min_area']} -p max_area:={CAL['max_area']} -p motion_threshold:={CAL['motion_threshold']} -p min_contrast:={CAL.get('min_contrast', 100)} -p dilate_iters:={CAL['dilate_iters']} -p edge_margin:={CAL['edge_margin']} -p kf_gate_px:={CAL.get('kf_gate_px', 250.0)} -p kf_process_noise:={CAL.get('kf_process_noise', 0.05)} {_roi_a} &\n"
             
             # Stereo Node (With all alignment parameters)
             f"ros2 run ttt_stereo stereo_node --ros-args -p fx:={CAL['fx']} -p fy:={CAL['fy']} -p cx:={CAL['cx']} -p cy:={CAL['cy']} -p baseline_m:={CAL.get('baseline_m', 1.525)} -p max_sync_age_ms:={CAL['max_sync_age_ms']} "
@@ -1425,13 +1484,12 @@ class SystemLauncher(threading.Thread):
             f"-p limit_x_m:={CAL.get('limit_x_m', 1.5)} -p limit_y_top_m:={CAL.get('limit_y_top_m', 2.0)} -p limit_y_bottom_m:={CAL.get('limit_y_bottom_m', -0.2)} -p limit_z_m:={CAL.get('limit_z_m', 2.5)} &\n"
             
             # Robust Trajectory Node
-            f"ros2 run ttt_trajectory trajectory_node --ros-args -p lookahead_ms:={CAL['lookahead_ms']} -p min_samples:={CAL['min_samples']} -p max_samples:={CAL['max_samples']} "
+            f"ros2 run ttt_trajectory trajectory_node --ros-args -p lookahead_ms:={CAL['lookahead_ms']} -p stage1_min_samples:={CAL.get('stage1_min_samples', 3)} -p stage2_min_samples:={CAL.get('stage2_min_samples', 8)} -p max_samples:={CAL['max_samples']} "
             f"-p gravity:={CAL['gravity']} -p restitution:={CAL['restitution']} "
             f"-p min_incoming_speed:={CAL.get('min_incoming_speed', 0.5)} "
             f"-p net_margin_z:={CAL.get('net_margin_z', -0.2)} "
             f"-p max_track_z:={CAL.get('max_track_z', 1.15)} "
-            f"-p max_velocity:={CAL.get('max_velocity', 25.0)} "
-            f"-p camera_tilt_deg:=0.0 -p table_y:=0.0 &\n"
+            f"-p max_velocity:={CAL.get('max_velocity', 25.0)} &\n"
             
             # TF Tree, MoveIt, Control, and Hardware Stack
             "ros2 launch ttt_calibration calibration.launch.py &\n"
@@ -1459,6 +1517,9 @@ class ROSWorker(threading.Thread):
         self.trail = deque(maxlen=25); self.pred = None; self.land = None; self.dets = {'left':None, 'right':None}
         self.last_3d_time = 0.0
         self._cam_count = {'left': 0, 'right': 0}; self._cam_t0 = {}; self._cam_fps = {'left': 0.0, 'right': 0.0}
+        self._prev_phase = 0
+        self.sample_log = []  # (x, y, z, stage) for debug logging
+        self._stage_locked = {1: False, 2: False, 3: False}
 
     def _rec(self, topic, typ, values):
         self.ws._topic_data[topic] = {'type': typ, 'last_t': time.time(), 'values': values}
@@ -1477,6 +1538,7 @@ class ROSWorker(threading.Thread):
         self.n.create_subscription(PointStamped, '/ball_position_3d', self.cb_3d, q)
         self.n.create_subscription(PointStamped, '/ball_trajectory/predicted', self.cb_pred, q)
         self.n.create_subscription(PointStamped, '/ball_trajectory/landing', self.cb_land, q)
+        self.n.create_subscription(Int32, '/ball_trajectory/phase', self.cb_phase, q)
         self.n.create_subscription(JointState, '/joint_states', self.cb_joints, q)
         self.n.create_subscription(BallDetection, '/ball_detection/left',
             lambda m: (self.dets.update({'left': m}),
@@ -1497,28 +1559,51 @@ class ROSWorker(threading.Thread):
         if now - self.last_3d_time > 0.2:
             self._archive_trajectory()
             self.trail.clear()
+            self.sample_log.clear()
             self.pred = None
             self.land = None
-            self.ws._stats.update({'px': None, 'py': None, 'pz': None, 'land_x': None, 'land_z': None})
-            
+            self.ws._stats.update({'px': None, 'py': None, 'pz': None, 'land_x': None, 'land_z': None,
+                                   'land_s1_x': None, 'land_s1_z': None, 'land_s2_x': None, 'land_s2_z': None,
+                                   'land_s3_x': None, 'land_s3_z': None, 'phase': 0})
+            self._stage_locked = {1: False, 2: False, 3: False}
+            self._prev_phase = 0
+
         # 2. Bounce clear (mimicking trajectory_node bounce logic)
         if m.point.z > 0.0 and m.point.y < 0.05:
             self._archive_trajectory()
             self.trail.clear()
-            
+            self.sample_log.clear()
+
         self.last_3d_time = now
         self.trail.append((round(m.point.x, 3), round(m.point.y, 3), round(m.point.z, 3)))
-        
+        self.sample_log.append((round(m.point.x, 3), round(m.point.y, 3), round(m.point.z, 3),
+                                self.ws._stats.get('phase', 0)))
+
         self.ws._stats.update({'x': m.point.x, 'y': m.point.y, 'z': m.point.z, 'trail': list(self.trail)})
         self._rec('/ball_position_3d', 'PointStamped', {'x': round(m.point.x, 3), 'y': round(m.point.y, 3), 'z': round(m.point.z, 3)})
 
     def _archive_trajectory(self):
-        if len(self.trail) >= 4 and self.land is not None:
-            log_str = "--- TRAJECTORY INTERCEPT ---\n"
-            log_str += f"Samples ({len(self.trail)}): {list(self.trail)}\n"
-            log_str += f"Landing Calc: X={self.land[0]:.3f}, Z={self.land[1]:.3f}\n"
-            self.ws.traj_logs.append(log_str)
-            if len(self.ws.traj_logs) > 20: self.ws.traj_logs.pop(0)
+        if len(self.sample_log) < 4: return
+        st = self.ws._stats
+        s1x, s1z = st.get('land_s1_x'), st.get('land_s1_z')
+        s2x, s2z = st.get('land_s2_x'), st.get('land_s2_z')
+        s3x, s3z = st.get('land_s3_x'), st.get('land_s3_z')
+        has_any_pred = any(v is not None for v in [s1x, s2x, s3x])
+        if not has_any_pred: return
+
+        log_str = "─" * 42 + "\n"
+        log_str += f"HIT  {len(self.sample_log)} samples\n"
+        log_str += "─" * 42 + "\n"
+        log_str += "SAMPLES:\n"
+        for i, (x, y, z, s) in enumerate(self.sample_log):
+            stage_lbl = f"S{s}" if s > 0 else "  "
+            log_str += f"  [{i+1:02d}] {stage_lbl}  X:{x:+.3f}  Y:{y:.3f}  Z:{z:+.3f}\n"
+        log_str += "PREDICTIONS:\n"
+        if s1x is not None: log_str += f"  Stage 1  →  X:{s1x:+.3f}  Z:{s1z:+.3f}\n"
+        if s2x is not None: log_str += f"  Stage 2  →  X:{s2x:+.3f}  Z:{s2z:+.3f}\n"
+        if s3x is not None: log_str += f"  Stage 3  →  X:{s3x:+.3f}  Z:{s3z:+.3f}\n"
+        self.ws.traj_logs.append(log_str)
+        if len(self.ws.traj_logs) > 20: self.ws.traj_logs.pop(0)
 
     def cb_pred(self, m):
         self.pred = (m.point.x, m.point.y, m.point.z)
@@ -1528,7 +1613,27 @@ class ROSWorker(threading.Thread):
     def cb_land(self, m):
         self.land = (m.point.x, m.point.z)
         self.ws._stats.update({'land_x': m.point.x, 'land_z': m.point.z})
+        s = self.ws._stats.get('phase', 0)
+        if s in (1, 2, 3):
+            # S3 always updates (live target). S1/S2 lock once the next stage fires.
+            if s == 3 or not self._stage_locked.get(s, False):
+                self.ws._stats[f'land_s{s}_x'] = m.point.x
+                self.ws._stats[f'land_s{s}_z'] = m.point.z
         self._rec('/ball_trajectory/landing', 'PointStamped', {'x': round(m.point.x, 3), 'z': round(m.point.z, 3)})
+
+    def cb_phase(self, m):
+        new_phase = m.data
+        old_phase = self._prev_phase
+        # On transition to a new stage, lock the previous stage's marker
+        if new_phase != old_phase:
+            if old_phase in (1, 2):
+                self._stage_locked[old_phase] = True
+            if new_phase == 0:
+                # Rally reset — unlock all stages
+                self._stage_locked = {1: False, 2: False, 3: False}
+        self._prev_phase = new_phase
+        self.ws._stats['phase'] = new_phase
+        self._rec('/ball_trajectory/phase', 'Int32', {'stage': new_phase})
 
     def pf(self, msg, side):
         now = time.time()
@@ -1567,6 +1672,49 @@ class ROSWorker(threading.Thread):
                 sx, sy, sz = self.ws._stats.get('x'), self.ws._stats.get('y'), self.ws._stats.get('z')
                 if sx is not None and sy is not None and sz is not None:
                     cv2.putText(frame, f"X:{sx:+.2f} Y:{sy:+.2f} Z:{sz:.2f}m", (cx - 80, label_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (100, 255, 100), 1, cv2.LINE_AA)
+
+            # ── Per-stage prediction markers ──────────────────────────────────
+            phase = self.ws._stats.get('phase', 0)
+            land = self.land
+            if phase > 0 and land is not None:
+                ws = self.ws
+                cam_x = -(ws.baseline / 2.0) if side == 'left' else (ws.baseline / 2.0)
+                cam_y = ws.hl if side == 'left' else ws.hr
+                cam_z = -ws.net_dist
+                p_ang = ws.pl if side == 'left' else -ws.pr
+                t_ang = ws.tl if side == 'left' else ws.tr
+                r_ang = ws.rl if side == 'left' else ws.rr
+
+                # Project landing point (table y=0) into camera
+                dx = land[0] - cam_x
+                dy = cam_y - 0.0
+                dz = land[1] - cam_z
+                x1 = dx * math.cos(p_ang) - dz * math.sin(p_ang)
+                z1 = dx * math.sin(p_ang) + dz * math.cos(p_ang)
+                y2 = dy * math.cos(t_ang) - z1 * math.sin(t_ang)
+                z2 = dy * math.sin(t_ang) + z1 * math.cos(t_ang)
+                cx2 = x1 * math.cos(r_ang) - y2 * math.sin(r_ang)
+                cy2 = x1 * math.sin(r_ang) + y2 * math.cos(r_ang)
+                lpt = project_3d(cx2, cy2, z2)
+                h_f, w_f = frame.shape[:2]
+                if lpt and 0 <= lpt[0] < w_f and 0 <= lpt[1] < h_f:
+                    if phase == 1:
+                        # Stage 1: large blue circle (rough estimate)
+                        cv2.circle(frame, lpt, 30, (255, 80, 0), 2)
+                        cv2.putText(frame, "S1", (lpt[0]+32, lpt[1]+5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 80, 0), 2, cv2.LINE_AA)
+                    elif phase == 2:
+                        # Stage 2: medium yellow circle (coarse estimate)
+                        cv2.circle(frame, lpt, 18, (0, 200, 255), 2)
+                        cv2.putText(frame, "S2", (lpt[0]+20, lpt[1]+5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 255), 2, cv2.LINE_AA)
+                    elif phase == 3:
+                        # Stage 3: small green circle + crosshair (final precise)
+                        cv2.circle(frame, lpt, 10, (0, 255, 80), 2)
+                        cv2.line(frame, (lpt[0]-18, lpt[1]), (lpt[0]+18, lpt[1]), (0, 255, 80), 1)
+                        cv2.line(frame, (lpt[0], lpt[1]-18), (lpt[0], lpt[1]+18), (0, 255, 80), 1)
+                        cv2.putText(frame, "S3", (lpt[0]+12, lpt[1]-12),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 80), 2, cv2.LINE_AA)
 
             draw_axis_indicator(frame)
             self.ws.push_frame(frame, side)

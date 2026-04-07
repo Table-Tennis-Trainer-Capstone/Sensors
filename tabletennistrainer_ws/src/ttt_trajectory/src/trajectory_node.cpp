@@ -1,378 +1,330 @@
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <std_msgs/msg/int32.hpp>
 #include <deque>
 #include <vector>
 #include <cmath>
 #include <numeric>
+#include <optional>
 
-// Stamped 3D sample
+// ── Prediction stage ──────────────────────────────────────────────────────────
+// IDLE  : no active tracking
+// STAGE1: 2+ samples on opponent's side  → rough side/X direction, robot faces the right side
+// STAGE2: 4+ samples on opponent's side  → coarse landing estimate, robot moves to intercept zone
+// STAGE3: ball has crossed the net (Z<0) → final precise prediction, robot refines to return spot
+enum class PredStage : int { IDLE = 0, STAGE1 = 1, STAGE2 = 2, STAGE3 = 3 };
+
 struct Sample {
-    double x, y, z;
-    double t;      // seconds, relative to first sample in buffer
-    double t_abs;  // absolute timestamp for gap checking
+    double x, y, z, t, t_abs;
 };
 
 class TrajectoryNode : public rclcpp::Node {
 public:
     TrajectoryNode() : Node("trajectory_node") {
-
-
-        this->declare_parameter("lookahead_ms",       200);
-        this->declare_parameter("min_samples",          4);
-        this->declare_parameter("max_samples",         10);
-        this->declare_parameter("gravity",             9.81);
-        this->declare_parameter("table_y",             0.0);   
-        this->declare_parameter("restitution",         0.85);
-        this->declare_parameter("camera_tilt_deg",     0.0);   
-        
-        // Minimum speed towards MARTY (-Z direction) to trigger a prediction
-        this->declare_parameter("min_incoming_speed",  0.5);   
-        // How close to the net (Z=0) the ball must have been to be considered an opponent hit
-        this->declare_parameter("net_margin_z",       -0.2);   
-        // Maximum Z depth to track. Ignores noise beyond the table end.
-        this->declare_parameter("max_track_z",         1.15);  
-        // Maximum physical velocity (m/s). Rejects noise jumps.
-        this->declare_parameter("max_velocity",        25.0);  
+        // ── Parameters ────────────────────────────────────────────────────────
+        this->declare_parameter("lookahead_ms",      200);
+        this->declare_parameter("max_samples",        15);
+        this->declare_parameter("gravity",           9.81);
+        this->declare_parameter("table_y",            0.0);
+        this->declare_parameter("restitution",        0.85);
+        this->declare_parameter("min_incoming_speed", 0.5);
+        this->declare_parameter("net_margin_z",      -0.2);
+        this->declare_parameter("max_track_z",        1.15);
+        this->declare_parameter("max_velocity",       25.0);
+        // Per-stage minimum samples before publishing
+        this->declare_parameter("stage1_min_samples",  2);
+        this->declare_parameter("stage2_min_samples",  4);
+        this->declare_parameter("stage3_min_samples",  2);  // after crossing net
 
         lookahead_ms_  = this->get_parameter("lookahead_ms").as_int();
-        min_samples_   = this->get_parameter("min_samples").as_int();
         max_samples_   = this->get_parameter("max_samples").as_int();
-        gravity_       = this->get_parameter("gravity").as_double();
+        gravity_y_     = this->get_parameter("gravity").as_double();
         table_y_       = this->get_parameter("table_y").as_double();
         restitution_   = this->get_parameter("restitution").as_double();
-        
         min_speed_     = this->get_parameter("min_incoming_speed").as_double();
         net_margin_    = this->get_parameter("net_margin_z").as_double();
         max_track_z_   = this->get_parameter("max_track_z").as_double();
         max_velocity_  = this->get_parameter("max_velocity").as_double();
-
-        // The prediction math uses: py = y0 + vy*t - 0.5 * gravity_y_ * t^2
-        // Since Y is UP and we want gravity to pull DOWN (negative), 
-        // gravity_y_ must be POSITIVE (e.g. +9.81) so the subtracted term is negative.
-        gravity_y_ = gravity_;
-        gravity_z_ = 0.0;
+        s1_min_        = this->get_parameter("stage1_min_samples").as_int();
+        s2_min_        = this->get_parameter("stage2_min_samples").as_int();
+        s3_min_        = this->get_parameter("stage3_min_samples").as_int();
 
         RCLCPP_INFO(this->get_logger(),
-            "Trajectory node (Robust) | lookahead=%dms samples=%d-%d | min_speed=%.1fm/s net_margin=%.1fm",
-            lookahead_ms_, min_samples_, max_samples_, min_speed_, net_margin_);
+            "Trajectory node | lookahead=%dms | stages min_samples=[%d,%d,%d] | "
+            "min_speed=%.1fm/s net_margin=%.2fm",
+            lookahead_ms_, s1_min_, s2_min_, s3_min_, min_speed_, net_margin_);
 
         position_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
             "/ball_position_3d", 10,
-            std::bind(&TrajectoryNode::positionCallback, this, std::placeholders::_1));
+            std::bind(&TrajectoryNode::cb, this, std::placeholders::_1));
 
         predicted_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
             "/ball_trajectory/predicted", 10);
-
-        landing_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
-            "/ball_trajectory/landing", 10);
+        landing_pub_   = this->create_publisher<geometry_msgs::msg::PointStamped>(
+            "/ball_trajectory/landing",   10);
+        phase_pub_     = this->create_publisher<std_msgs::msg::Int32>(
+            "/ball_trajectory/phase",     10);
     }
 
 private:
-    void positionCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
-        double t_abs = rclcpp::Time(msg->header.stamp).seconds();
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    void fitLinear(const std::vector<double>& t, const std::vector<double>& p,
+                   double& p0, double& v) {
+        int n = t.size();
+        double st=0, sp=0, stt=0, stp=0;
+        for (int i=0;i<n;i++){st+=t[i];sp+=p[i];stt+=t[i]*t[i];stp+=t[i]*p[i];}
+        double d = n*stt - st*st;
+        if (std::abs(d)<1e-9){p0=sp/n;v=0;return;}
+        v  = (n*stp - st*sp)/d;
+        p0 = (sp - v*st)/n;
+    }
 
-        // SPATIAL PRE-FILTER: Ignore anything physically beyond the tracking limit 
-        if (msg->point.z > max_track_z_) {
+    void fitParabolic(const std::vector<double>& t, const std::vector<double>& p,
+                      double gcomp, double& p0, double& v) {
+        std::vector<double> c(p.size());
+        for (size_t i=0;i<p.size();i++) c[i]=p[i]+0.5*gcomp*t[i]*t[i];
+        fitLinear(t, c, p0, v);
+    }
+
+    struct Landing { double x, z, t_land; };
+
+    std::optional<Landing> findLanding(double x0,double vx,double y0,double vy,
+                                       double z0,double vz,double t_now) {
+        double a=0.5*gravity_y_, b=-vy, c=table_y_-y0;
+        double disc=b*b-4*a*c;
+        if(disc<0) return std::nullopt;
+        double sq=std::sqrt(disc);
+        double t1=(-b-sq)/(2*a), t2=(-b+sq)/(2*a);
+        double tl=-1;
+        if(t1>t_now) tl=t1;
+        if(t2>t_now&&(tl<0||t2<tl)) tl=t2;
+        if(tl<0) return std::nullopt;
+        return Landing{x0+vx*tl, z0+vz*tl, tl};
+    }
+
+    struct PredPt { double x,y,z; bool bounced; };
+
+    PredPt predictWithBounce(double x0,double vx,double y0,double vy,
+                             double z0,double vz,double t_now,double t_pred) {
+        double a=0.5*gravity_y_, b=-vy, c=table_y_-y0;
+        double disc=b*b-4*a*c;
+        if(disc>=0){
+            double sq=std::sqrt(disc);
+            double t1=(-b-sq)/(2*a), t2=(-b+sq)/(2*a);
+            double tb=-1;
+            if(t1>t_now&&t1<t_pred) tb=t1;
+            if(t2>t_now&&t2<t_pred&&(tb<0||t2<tb)) tb=t2;
+            if(tb>0){
+                double bvy=-(vy-gravity_y_*tb)*restitution_;
+                double dt=t_pred-tb;
+                return {x0+vx*t_pred,
+                        table_y_+bvy*dt-0.5*gravity_y_*dt*dt,
+                        z0+vz*t_pred, true};
+            }
+        }
+        return {x0+vx*t_pred, y0+vy*t_pred-0.5*gravity_y_*t_pred*t_pred,
+                z0+vz*t_pred, false};
+    }
+
+    void resetBuffer(const char* reason) {
+        RCLCPP_INFO(this->get_logger(), "Buffer reset: %s", reason);
+        buffer_.clear();
+        stage_ = PredStage::IDLE;
+        originated_across_net_ = false;
+        ball_crossed_net_ = false;
+        despike_strikes_ = 0;
+        has_pred_ = false; has_land_ = false;
+        pred_locked_ = false; land_locked_ = false;
+        publishPhase();
+    }
+
+    void publishPhase() {
+        std_msgs::msg::Int32 m;
+        m.data = static_cast<int>(stage_);
+        phase_pub_->publish(m);
+    }
+
+    // ── Per-stage smoothing alpha ─────────────────────────────────────────────
+    // Stage 1: snap fast to first estimate (robot needs to start moving early)
+    // Stage 2: track well but don't jitter
+    // Stage 3: mostly stable (ball almost at bounce point, don't overshoot)
+    double predAlpha()  { return stage_==PredStage::STAGE1 ? 0.85
+                               : stage_==PredStage::STAGE2 ? 0.55 : 0.30; }
+    double landAlpha()  { return stage_==PredStage::STAGE1 ? 0.75
+                               : stage_==PredStage::STAGE2 ? 0.40 : 0.20; }
+
+    // ── Main callback ─────────────────────────────────────────────────────────
+    void cb(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
+        double t_abs = rclcpp::Time(msg->header.stamp).seconds();
+        double bx=msg->point.x, by=msg->point.y, bz=msg->point.z;
+
+        // Ignore points physically beyond table end
+        if (bz > max_track_z_) return;
+
+        // Gap > 200 ms ⇒ new rally
+        if (!buffer_.empty() && (t_abs - buffer_.back().t_abs > 0.2))
+            resetBuffer("tracking gap >200ms");
+
+        // Ball touched table surface ⇒ bounce, new arc
+        if (by < table_y_ + 0.05) {
+            resetBuffer("bounce detected");
             return;
         }
 
-        // CONTINUITY CHECK: If tracking drops for >200ms, assume it's a new stroke and wipe the buffer.
-        if (!buffer_.empty() && (t_abs - buffer_.back().t_abs > 0.2)) {
-            RCLCPP_INFO(this->get_logger(), "Tracking gap > 200ms. Resetting trajectory buffer.");
-            buffer_.clear();
-            has_prev_pred_ = false;
-            has_prev_land_ = false;
-            originated_across_net_ = false;
-            despike_strikes_ = 0;
+        // Track whether ball originated on opponent's side
+        if (bz > std::abs(net_margin_)) originated_across_net_ = true;
+
+        // Track net crossing (opponent's side → MARTY's side)
+        if (!ball_crossed_net_ && originated_across_net_ && bz < 0.0) {
+            ball_crossed_net_ = true;
+            // Snap EMA so Stage 3 locks onto first crossing prediction immediately
+            has_pred_ = false; has_land_ = false;
+            pred_locked_ = false; land_locked_ = false;
+            RCLCPP_INFO(this->get_logger(), "Ball crossed net → STAGE 3");
         }
 
-        // Keep track of origin state persistently across bounces
-        if (msg->point.z > net_margin_) {
-            originated_across_net_ = true;
-        }
-
-        // BOUNCE CLEAR: If the ball bounces ANYWHERE, clear the buffer.
-        // This prevents fitting a single parabola across the V-shape of a bounce.
-        // (Table Y is 0.0, ball radius + jitter margin = 0.05m)
-        if (msg->point.y < table_y_ + 0.05) {
-            buffer_.clear();
-            has_prev_pred_ = false;
-            has_prev_land_ = false;
-            despike_strikes_ = 0;
-        }
-
-        // DESPIKE PRE-FILTER: Prevent impossible tracking jumps from corrupting the buffer.
-        // Protects the historical arc if the vision system accidentally flashes onto background noise.
+        // Despike
         if (!buffer_.empty()) {
             double dt = t_abs - buffer_.back().t_abs;
             if (dt > 0.0) {
-                double dist = std::sqrt(std::pow(msg->point.x - buffer_.back().x, 2) +
-                                        std::pow(msg->point.y - buffer_.back().y, 2) +
-                                        std::pow(msg->point.z - buffer_.back().z, 2));
-                if ((dist / dt) > max_velocity_) {
-                    despike_strikes_++;
-                    if (despike_strikes_ > 3) {
-                        // If it teleports and STAYS there, it's a new legitimate target. Restart!
-                        RCLCPP_WARN(this->get_logger(), "Tracking teleported! Resetting buffer to new target.");
-                        buffer_.clear();
-                        has_prev_pred_ = false;
-                        has_prev_land_ = false;
-                        originated_across_net_ = false;
-                        despike_strikes_ = 0;
-                    } else {
-                        return; // Drop the 1-to-3 frame noise glitch, keep the valid buffer history!
-                    }
-                } else {
-                    despike_strikes_ = 0; // Good point, reset strikes
+                double dist = std::hypot(std::hypot(bx-buffer_.back().x, by-buffer_.back().y),
+                                         bz-buffer_.back().z);
+                if ((dist/dt) > max_velocity_) {
+                    if (++despike_strikes_ > 3)
+                        resetBuffer("teleport detected");
+                    return;
                 }
+                despike_strikes_ = 0;
             }
         }
 
         if (buffer_.empty()) t0_ = t_abs;
-
-        Sample s;
-        s.x = msg->point.x;
-        s.y = msg->point.y;
-        s.z = msg->point.z;
-        s.t_abs = t_abs;
-        s.t = t_abs - t0_;
-        buffer_.push_back(s);
-
+        buffer_.push_back({bx, by, bz, t_abs-t0_, t_abs});
         if ((int)buffer_.size() > max_samples_) buffer_.pop_front();
-        if ((int)buffer_.size() < min_samples_) return;
 
-        // Normalize timestamps so oldest = 0
+        // ── Build fit vectors ─────────────────────────────────────────────────
         std::vector<double> ts, xs, ys, zs;
-        double t_offset = buffer_.front().t;
-        for (const auto& b : buffer_) {
-            ts.push_back(b.t - t_offset);
-            xs.push_back(b.x);
-            ys.push_back(b.y);
-            zs.push_back(b.z);
+        double t_off = buffer_.front().t;
+        for (const auto& s : buffer_) {
+            ts.push_back(s.t - t_off);
+            xs.push_back(s.x); ys.push_back(s.y); zs.push_back(s.z);
         }
 
-        // Fit Z first so we can check the velocity before doing the heavy lifting
-        double vz, z0;
-        fitParabolic(ts, zs, -gravity_z_, z0, vz); 
+        // ── Fit Z, check velocity direction ───────────────────────────────────
+        double vz, z0; fitParabolic(ts, zs, 0.0, z0, vz);
+        if (vz > -min_speed_) return;                // not coming toward MARTY
+        if (std::abs(vz) > max_velocity_) return;    // noise
 
-        // DIRECTION CHECK: Is the ball moving towards MARTY fast enough?
-        // (vz must be negative, and the magnitude must be > min_speed_)
-        if (vz > -min_speed_) {
-            // Ball is either moving away (outgoing shot) or rolling too slowly.
-            return;
-        }
-
-        // MAX VELOCITY CHECK: Reject teleporting noise blobs
-        if (std::abs(vz) > max_velocity_) {
-            return;
-        }
-
-        // STRICT DISPLACEMENT & TIME CHECK: Filter out Z-noise and slow dribbles.
-        // The ball must have dropped a certain amount of Z in a certain time.
         double z_drop = buffer_.front().z - buffer_.back().z;
-        double dt_total = buffer_.back().t - buffer_.front().t;
-        
-        if (z_drop < 0.04) {  // Require 4cm of movement to overcome stereo jitter
-            return;
+        double dt_span = buffer_.back().t - buffer_.front().t;
+        if (z_drop < 0.015) return;
+        if (dt_span > 0.0 && (z_drop/dt_span) < min_speed_) return;
+        if (!originated_across_net_) return;
+
+        // ── Determine stage ───────────────────────────────────────────────────
+        int n = (int)buffer_.size();
+        PredStage new_stage;
+        if (ball_crossed_net_ && n >= s3_min_)
+            new_stage = PredStage::STAGE3;
+        else if (!ball_crossed_net_ && n >= s2_min_)
+            new_stage = PredStage::STAGE2;
+        else if (!ball_crossed_net_ && n >= s1_min_)
+            new_stage = PredStage::STAGE1;
+        else
+            return; // not enough samples yet
+
+        if (new_stage != stage_) {
+            stage_ = new_stage;
+            // Snap EMA to first value at each stage transition
+            has_pred_ = false; has_land_ = false;
+            pred_locked_ = false; land_locked_ = false;
+            RCLCPP_INFO(this->get_logger(), "→ STAGE %d (n=%d, Vz=%.2f m/s)",
+                        static_cast<int>(stage_), n, vz);
+            publishPhase();
         }
-        if (dt_total > 0.0 && (z_drop / dt_total) < min_speed_) {
-            return;
+
+        // ── Fit X, Y ─────────────────────────────────────────────────────────
+        double vx, x0; fitLinear(ts, xs, x0, vx);
+        double vy, y0; fitParabolic(ts, ys, gravity_y_, y0, vy);
+        if (std::abs(vx) > max_velocity_ || std::abs(vy) > max_velocity_) return;
+
+        double t_now = buffer_.back().t - t_off;
+        auto land = findLanding(x0,vx,y0,vy,z0,vz,t_now);
+        if (!land) return;
+
+        // Must land on MARTY's side
+        if (land->z >= 0.0) return;
+        // Sanity bounds
+        if (std::abs(land->x) > 1.5 || land->z < -1.5) return;
+
+        // ── Landing EMA ───────────────────────────────────────────────────────
+        double la = landAlpha();
+        if (!has_land_) {
+            sl_x_=land->x; sl_z_=land->z; has_land_=true;
+            if (stage_ == PredStage::STAGE3) land_locked_ = true;
+        } else if (!land_locked_) {
+            sl_x_ = la*land->x + (1-la)*sl_x_;
+            sl_z_ = la*land->z + (1-la)*sl_z_;
         }
 
-        // ORIGIN CHECK: Did this shot come from across the net?
-        if (!originated_across_net_) {
-            // Ball is moving towards MARTY, but it started deep on MARTY's side 
-            // (e.g., dribbling backward or rolling). Ignore it.
-            return;
-        }
+        auto lmsg = geometry_msgs::msg::PointStamped();
+        lmsg.header = msg->header;
+        lmsg.header.frame_id = "table";
+        lmsg.point.x=sl_x_; lmsg.point.y=table_y_; lmsg.point.z=sl_z_;
+        landing_pub_->publish(lmsg);
 
-        // Fit X and Y
-        double vx, x0;
-        fitLinear(ts, xs, x0, vx);
+        // ── Post-bounce intercept EMA ─────────────────────────────────────────
+        double t_int = land->t_land + lookahead_ms_/1000.0;
+        auto [px,py,pz,bounced] = predictWithBounce(x0,vx,y0,vy,z0,vz,t_now,t_int);
 
-        double vy, y0;
-        fitParabolic(ts, ys, gravity_y_, y0, vy);
-
-        // SANITY CHECK: Are the fitted lateral/vertical speeds physically possible?
-        if (std::abs(vx) > max_velocity_ || std::abs(vy) > max_velocity_) {
-            return;
-        }
-
-        double t_now   = s.t - t_offset;
-
-        auto landing = findLanding(x0, vx, y0, vy, z0, vz, t_now);
-        if (landing.has_value()) {
-            
-            // LANDING BOUNDS CHECK: Reject trajectories that land in another timezone
-            // (Table width is +/-0.76m. Robot base is at Z=-1.4732m. If it lands behind the robot or way off side, ignore it)
-            if (std::abs(landing->x) > 1.5 || landing->z < -1.48 || landing->z > 2.0) {
-                return;
+        double pa = predAlpha();
+        if (!has_pred_) {
+            sp_x_=px; sp_y_=py; sp_z_=pz; has_pred_=true;
+            if (stage_ == PredStage::STAGE3) {
+                pred_locked_ = true;
+                RCLCPP_INFO(this->get_logger(),
+                    "🔒 STAGE3 prediction LOCKED → X:%+.3f Z:%.3f", sp_x_, sp_z_);
             }
-
-            // ONLY ALLOW LANDING SPOTS ON MARTY'S SIDE OF THE NET (Z < 0)
-            if (landing->z < 0.0) {
-                
-                // POST-BOUNCE INTERCEPT: Target the ball X milliseconds AFTER it bounces on Marty's side!
-                double t_intercept = landing->t_land + (lookahead_ms_ / 1000.0);
-                auto [px, py, pz, bounced] = predictWithBounce(x0, vx, y0, vy, z0, vz, t_now, t_intercept);
-
-                // If it's a new prediction OR the jump is huge (ghost), snap to it immediately
-                if (!has_prev_pred_ || std::abs(px - smooth_px_) > 1.0) {
-                    smooth_px_ = px; smooth_py_ = py; smooth_pz_ = pz;
-                    has_prev_pred_ = true;
-                } else {
-                    double a = 0.4; // Increased from 0.15 so it tracks faster and stops lagging behind
-                    smooth_px_ = a * px + (1.0 - a) * smooth_px_;
-                    smooth_py_ = a * py + (1.0 - a) * smooth_py_;
-                    smooth_pz_ = a * pz + (1.0 - a) * smooth_pz_;
-                }
-
-                auto predicted_msg = geometry_msgs::msg::PointStamped();
-                predicted_msg.header.stamp    = msg->header.stamp;
-                predicted_msg.header.frame_id = "table";
-                predicted_msg.point.x = smooth_px_;
-                predicted_msg.point.y = smooth_py_;
-                predicted_msg.point.z = smooth_pz_;
-                predicted_pub_->publish(predicted_msg);
-
-                if (!has_prev_land_) {
-                    smooth_lx_ = landing->x; smooth_lz_ = landing->z;
-                    has_prev_land_ = true;
-                } else {
-                    double a = 0.15;
-                    smooth_lx_ = a * landing->x + (1.0 - a) * smooth_lx_;
-                    smooth_lz_ = a * landing->z + (1.0 - a) * smooth_lz_;
-                }
-
-                auto landing_msg = geometry_msgs::msg::PointStamped();
-                landing_msg.header.stamp    = msg->header.stamp;
-                landing_msg.header.frame_id = "table";
-                landing_msg.point.x = smooth_lx_;
-                landing_msg.point.y = table_y_;
-                landing_msg.point.z = smooth_lz_;
-                landing_pub_->publish(landing_msg);
-
-                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 100,
-                    "INCOMING! | Vz:%.2f m/s | Landing X:%+.3f Z:%.3f in %.0fms",
-                    vz, smooth_lx_, smooth_lz_, landing->t_land * 1000.0);
-            }
-        }
-    }
-
-    // Linear least squares: pos = p0 + v*t 
-    void fitLinear(const std::vector<double>& t, const std::vector<double>& p,
-                   double& p0, double& v)
-    {
-        int n = t.size();
-        double sum_t  = std::accumulate(t.begin(), t.end(), 0.0);
-        double sum_p  = std::accumulate(p.begin(), p.end(), 0.0);
-        double sum_tt = 0.0, sum_tp = 0.0;
-        for (int i = 0; i < n; i++) { sum_tt += t[i]*t[i]; sum_tp += t[i]*p[i]; }
-        double denom = n * sum_tt - sum_t * sum_t;
-        if (std::abs(denom) < 1e-9) { p0 = sum_p / n; v = 0.0; return; }
-        v  = (n * sum_tp - sum_t * sum_p) / denom;
-        p0 = (sum_p - v * sum_t) / n;
-    }
-
-    // Parabolic fit: pos = p0 + v*t - 0.5 * gcomp * t^2
-    void fitParabolic(const std::vector<double>& t, const std::vector<double>& p,
-                      double gcomp, double& p0, double& v)
-    {
-        std::vector<double> corrected(p.size());
-        for (size_t i = 0; i < p.size(); i++)
-            corrected[i] = p[i] + 0.5 * gcomp * t[i] * t[i];
-        fitLinear(t, corrected, p0, v);
-    }
-
-    // Predict position, handling one bounce
-    struct PredResult { double x, y, z; bool bounced; };
-
-    PredResult predictWithBounce(
-        double x0, double vx, double y0, double vy,
-        double z0, double vz, double t_now, double t_pred)
-    {
-        double a = 0.5 * gravity_y_;
-        double b = -vy;
-        double c = table_y_ - y0;
-        double disc = b*b - 4*a*c;
-
-        if (disc >= 0) {
-            double sqrt_disc = std::sqrt(disc);
-            double t1 = (-b - sqrt_disc) / (2*a);
-            double t2 = (-b + sqrt_disc) / (2*a);
-            double t_bounce = -1.0;
-                if (t1 > t_now && t1 < t_pred) t_bounce = t1;
-                if (t2 > t_now && t2 < t_pred && (t_bounce < 0 || t2 < t_bounce)) t_bounce = t2;
-
-            if (t_bounce > 0) {
-                double bx = x0 + vx * t_bounce;
-                double bz = z0 + vz * t_bounce - 0.5 * gravity_z_ * t_bounce * t_bounce;
-                double bvy = -(vy - gravity_y_ * t_bounce) * restitution_;
-                double bvz =   vz - gravity_z_ * t_bounce; 
-                    double dt_rem = t_pred - t_bounce;
-                    double px = bx + vx * dt_rem;
-                double py = table_y_ + bvy * dt_rem - 0.5 * gravity_y_ * dt_rem * dt_rem;
-                double pz = bz + bvz * dt_rem - 0.5 * gravity_z_ * dt_rem * dt_rem;
-                return {px, py, pz, true};
-            }
+        } else if (!pred_locked_) {
+            sp_x_ = pa*px + (1-pa)*sp_x_;
+            sp_y_ = pa*py + (1-pa)*sp_y_;
+            sp_z_ = pa*pz + (1-pa)*sp_z_;
         }
 
-            double px = x0 + vx * t_pred;
-            double py = y0 + vy * t_pred - 0.5 * gravity_y_ * t_pred * t_pred;
-            double pz = z0 + vz * t_pred - 0.5 * gravity_z_ * t_pred * t_pred;
-        return {px, py, pz, false};
+        auto pmsg = geometry_msgs::msg::PointStamped();
+        pmsg.header = msg->header;
+        pmsg.header.frame_id = "table";
+        pmsg.point.x=sp_x_; pmsg.point.y=sp_y_; pmsg.point.z=sp_z_;
+        predicted_pub_->publish(pmsg);
+
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 80,
+            "[S%d] Vz:%.2f | Land X:%+.3f Z:%.3f | Int X:%+.3f Z:%.3f in %.0fms",
+            static_cast<int>(stage_), vz,
+            sl_x_, sl_z_, sp_x_, sp_z_, land->t_land*1000.0);
     }
 
-    // Find next table landing point
-    struct LandingResult { double x, z, t_land; };
-
-    std::optional<LandingResult> findLanding(
-        double x0, double vx, double y0, double vy,
-        double z0, double vz, double t_now)
-    {
-        double a = 0.5 * gravity_y_;
-        double b = -vy;
-        double c = table_y_ - y0;
-        double disc = b*b - 4*a*c;
-        if (disc < 0) return std::nullopt;
-
-        double sqrt_disc = std::sqrt(disc);
-        double t1 = (-b - sqrt_disc) / (2*a);
-        double t2 = (-b + sqrt_disc) / (2*a);
-
-        double t_land = -1.0;
-            if (t1 > t_now) t_land = t1;
-            if (t2 > t_now && (t_land < 0 || t2 < t_land)) t_land = t2;
-        if (t_land < 0) return std::nullopt;
-
-        return LandingResult{
-            x0 + vx * t_land,
-            z0 + vz * t_land - 0.5 * gravity_z_ * t_land * t_land,
-            t_land
-        };
-    }
-    
-    int lookahead_ms_, min_samples_, max_samples_;
-    double gravity_, gravity_y_, gravity_z_;
-    double table_y_, restitution_, net_z_;
-    double min_speed_, net_margin_;
-    double max_track_z_;
-    double max_velocity_;
+    // ── State ─────────────────────────────────────────────────────────────────
+    int lookahead_ms_, max_samples_, s1_min_, s2_min_, s3_min_;
+    double gravity_y_, table_y_, restitution_;
+    double min_speed_, net_margin_, max_track_z_, max_velocity_;
     double t0_ = 0.0;
     int despike_strikes_ = 0;
 
-    // EMA Smoothing State
-    bool has_prev_pred_ = false;
-    bool has_prev_land_ = false;
-    double smooth_px_ = 0.0, smooth_py_ = 0.0, smooth_pz_ = 0.0;
-    double smooth_lx_ = 0.0, smooth_lz_ = 0.0;
+    PredStage stage_ = PredStage::IDLE;
     bool originated_across_net_ = false;
+    bool ball_crossed_net_      = false;
+
+    bool has_pred_ = false, has_land_ = false;
+    bool pred_locked_ = false, land_locked_ = false;
+    double sp_x_=0, sp_y_=0, sp_z_=0;
+    double sl_x_=0, sl_z_=0;
 
     std::deque<Sample> buffer_;
 
     rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr position_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr predicted_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr landing_pub_;
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr phase_pub_;
 };
 
 int main(int argc, char** argv) {

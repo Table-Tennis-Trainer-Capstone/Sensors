@@ -1,0 +1,26 @@
+joint_limits:
+  BaseRotate_0:
+    has_velocity_limits: true
+    max_velocity: 5.0
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  UpperArmRotate_0:
+    has_velocity_limits: true
+    max_velocity: 5.0
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  ForeArmRotate_0:
+    has_velocity_limits: true
+    max_velocity: 5.0
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  WristRotate_0:
+    has_velocity_limits: true
+    max_velocity: 5.0
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  PaddleRotate_0:
+    has_velocity_limits: true
+    max_velocity: 5.0
+    has_acceleration_limits: true
+    max_acceleration: 5.0

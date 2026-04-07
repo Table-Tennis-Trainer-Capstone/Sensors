@@ -9,6 +9,7 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <cmath>
 
 // Subscribes to /ball_trajectory/predicted, transforms the target point into
 // world frame, then sends a pose goal to MoveIt's move_group (armgroup,
@@ -22,6 +23,7 @@ public:
         this->declare_parameter("update_rate_hz",  10.0);
         this->declare_parameter("planning_time_s",  0.1);  // 100ms planning budget
         this->declare_parameter("return_delay_ms",  100);  // delay before returning home after swing
+        this->declare_parameter("speed_multiplier", 4.0);  // Overdrive multiplier to bypass slow URDF limits
 
         tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -58,6 +60,19 @@ public:
 
         rclcpp::Rate rate(this->get_parameter("update_rate_hz").as_double());
 
+        double speed_mult = this->get_parameter("speed_multiplier").as_double();
+        auto overdrive_trajectory = [speed_mult](moveit::planning_interface::MoveGroupInterface::Plan& p) {
+            if (speed_mult <= 1.0) return;
+            for (auto& pt : p.trajectory_.joint_trajectory.points) {
+                double sec = pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9;
+                sec /= speed_mult;
+                pt.time_from_start.sec = static_cast<int32_t>(std::floor(sec));
+                pt.time_from_start.nanosec = static_cast<uint32_t>((sec - pt.time_from_start.sec) * 1e9);
+                for (auto& v : pt.velocities) v *= speed_mult;
+                for (auto& a : pt.accelerations) a *= (speed_mult * speed_mult);
+            }
+        };
+
         while (rclcpp::ok()) {
             // Named target commands 
             std::string named_target;
@@ -79,6 +94,7 @@ public:
                 move_group_->setNamedTarget(named_target);
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 if (move_group_->plan(plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+                    overdrive_trajectory(plan);
                     move_group_->execute(plan);
                     RCLCPP_INFO(this->get_logger(), "Named target '%s' executed", named_target.c_str());
                 } else {
@@ -106,6 +122,7 @@ public:
                     target.position.x, target.position.y, target.position.z);
                 auto result = move_group_->plan(plan);
                 if (result == moveit::core::MoveItErrorCode::SUCCESS) {
+                    overdrive_trajectory(plan);
                     move_group_->execute(plan);
                     RCLCPP_INFO(this->get_logger(), "Executed plan → table (%.3f, %.3f, %.3f)",
                         target.position.x, target.position.y, target.position.z);
@@ -118,6 +135,7 @@ public:
                     move_group_->setNamedTarget("ready");
                     moveit::planning_interface::MoveGroupInterface::Plan ready_plan;
                     if (move_group_->plan(ready_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+                        overdrive_trajectory(ready_plan);
                         move_group_->execute(ready_plan);
                         RCLCPP_INFO(this->get_logger(), "Returned to ready");
                     }
