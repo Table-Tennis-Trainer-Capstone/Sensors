@@ -10,9 +10,9 @@ fi
 
 export ROS_DOMAIN_ID=43
 unset CYCLONEDDS_URI
-unset ROS_LOCALHOST_ONLY
+export ROS_LOCALHOST_ONLY=1
 export DYLD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}"
 
 echo "ROS_DOMAIN_ID = $ROS_DOMAIN_ID"
-echo "CYCLONEDDS_URI unset (use default interface to reach stack)"
+echo "ROS_LOCALHOST_ONLY = 1 (Local loopback only)"
 echo "AMENT_PREFIX_PATH = $AMENT_PREFIX_PATH"

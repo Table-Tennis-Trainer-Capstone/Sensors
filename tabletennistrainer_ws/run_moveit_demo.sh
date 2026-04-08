@@ -26,10 +26,8 @@ fi
 export ROS_DOMAIN_ID=43
 export DYLD_LIBRARY_PATH="$CONDA_PFX/lib:${DYLD_LIBRARY_PATH:-}"
 
-# Use default DDS transport (en0 multicast). Explicitly clear any localhost-only
-# env vars that may have been set in parent shell from previous debug sessions.
 unset CYCLONEDDS_URI
-unset ROS_LOCALHOST_ONLY
+export ROS_LOCALHOST_ONLY=1
 
 echo "AMENT_PREFIX_PATH = $AMENT_PREFIX_PATH"
 echo "ROS_DOMAIN_ID     = $ROS_DOMAIN_ID"
@@ -52,11 +50,15 @@ echo "[2/4] ros2_control fake hardware + controllers..."
 ros2 launch ttt_control controllers.launch.py &
 sleep 3
 
-echo "[3/4] MoveIt move_group (takes ~8s)..."
+echo "[3/5] MoveIt move_group (takes ~8s)..."
 ros2 launch ttt_control move_group.launch.py &
 sleep 9
 
-echo "[4/4] RViz2 (via MoveIt launch so kinematics params are loaded)..."
+echo "[4/5] Control Node..."
+ros2 run ttt_control control_node &
+sleep 2
+
+echo "[5/5] RViz2 (via MoveIt launch so kinematics params are loaded)..."
 RVIZ_CFG="$SCRIPT_DIR/ttt_demo.rviz"
 if [ -f "$RVIZ_CFG" ]; then
     ros2 launch ttt_control moveit_rviz.launch.py rviz_config:="$RVIZ_CFG"

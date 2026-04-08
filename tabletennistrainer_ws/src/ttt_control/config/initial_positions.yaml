@@ -1,12 +1,7 @@
-# Default initial positions for mainarmass's ros2_control fake system
-# Values must be within URDF joint limits:
-#   UpperArmRotate_0: [-0.2617, 1.3963]
-#   ForeArmRotate_0:  [-4.1888, 0.5236]
-#   WristRotate_0:    [-2.967,  2.50]
-
+# Initial positions for mock ros2_control hardware (matches 'home' state)
 initial_positions:
   BaseRotate_0: 0.0
-  UpperArmRotate_0: 0.0
-  ForeArmRotate_0: -2.59
-  WristRotate_0: 2.33
+  UpperArmRotate_0: -0.2616
+  ForeArmRotate_0: 0.4319
+  WristRotate_0: -0.1028
   PaddleRotate_0: 0.0
