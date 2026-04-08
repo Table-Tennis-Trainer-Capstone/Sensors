@@ -54,6 +54,9 @@ public:
         move_group_->setMaxVelocityScalingFactor(1.0);
         move_group_->setMaxAccelerationScalingFactor(1.0);
 
+        // Ensure MoveIt plans using the exact frame we are transforming our targets into
+        move_group_->setPoseReferenceFrame("root");
+
         RCLCPP_INFO(this->get_logger(),
             "MoveIt ready | group: armgroup | end-effector: paddle_tcp | planning time: %.3f s",
             this->get_parameter("planning_time_s").as_double());
@@ -111,9 +114,41 @@ public:
                     target = latest_target_;
                 }
 
-                move_group_->setPositionTarget(
-                    target.position.x, target.position.y, target.position.z, "paddle_tcp");
-                move_group_->setGoalPositionTolerance(0.08);  // 8cm — ball interception tolerance
+                // Use position-only IK because locking global orientation on a 4/5-DOF arm 
+                // forces the base to twist 180 degrees to maintain the paddle's static yaw angle.
+                move_group_->setPositionTarget(target.position.x, target.position.y, target.position.z, "paddle_tcp");
+                move_group_->setGoalPositionTolerance(0.08);   // 8cm — ball interception tolerance
+
+                moveit_msgs::msg::Constraints constraints;
+
+                // Prevent the arm from spinning 180 degrees (glitching backwards) by constraining the base joint
+                moveit_msgs::msg::JointConstraint base_constraint;
+                base_constraint.joint_name = "BaseRotate_0";
+                base_constraint.position = -0.785;       // Center of table
+                base_constraint.tolerance_above = 1.50;  // Widen to ~85 deg to allow reaching extreme right
+                base_constraint.tolerance_below = 1.50;  // Widen to ~85 deg to allow reaching extreme left
+                base_constraint.weight = 1.0;
+                constraints.joint_constraints.push_back(base_constraint);
+
+                // Keep the paddle face untwisted (prevent rolling mid-swing)
+                moveit_msgs::msg::JointConstraint paddle_constraint;
+                paddle_constraint.joint_name = "PaddleRotate_0";
+                paddle_constraint.position = 0.0;        // Ready state angle (flat)
+                paddle_constraint.tolerance_above = 0.15;
+                paddle_constraint.tolerance_below = 0.15;
+                paddle_constraint.weight = 1.0;
+                constraints.joint_constraints.push_back(paddle_constraint);
+
+                // Keep the wrist near its "ready" angle so the paddle face stays vertical
+                moveit_msgs::msg::JointConstraint wrist_constraint;
+                wrist_constraint.joint_name = "WristRotate_0";
+                wrist_constraint.position = -1.08;       // Ready state angle
+                wrist_constraint.tolerance_above = 0.7;  // Allow flex to reach different depths/heights
+                wrist_constraint.tolerance_below = 0.7;
+                wrist_constraint.weight = 0.8;
+                constraints.joint_constraints.push_back(wrist_constraint);
+
+                move_group_->setPathConstraints(constraints);
 
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
 
@@ -127,11 +162,24 @@ public:
                     RCLCPP_INFO(this->get_logger(), "Executed plan → table (%.3f, %.3f, %.3f)",
                         target.position.x, target.position.y, target.position.z);
 
-                    // Return to ready position after swing
+                    // Return to ready position after swing.
+                    // Set start state from the last point of the executed trajectory so
+                    // the planner doesn't use stale joint_states from the broadcaster.
                     std::this_thread::sleep_for(
                         std::chrono::milliseconds(
                             static_cast<int>(this->get_parameter("return_delay_ms").as_int())));
+                    {
+                        const auto & last_pt =
+                            plan.trajectory_.joint_trajectory.points.back();
+                        const auto & joint_names =
+                            plan.trajectory_.joint_trajectory.joint_names;
+                        moveit::core::RobotStatePtr start_state =
+                            move_group_->getCurrentState(2.0);
+                        start_state->setVariablePositions(joint_names, last_pt.positions);
+                        move_group_->setStartState(*start_state);
+                    }
                     move_group_->setPlannerId("RRTConnect");
+                move_group_->clearPathConstraints(); // Clear constraints so it can return home freely
                     move_group_->setNamedTarget("ready");
                     moveit::planning_interface::MoveGroupInterface::Plan ready_plan;
                     if (move_group_->plan(ready_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
@@ -139,7 +187,12 @@ public:
                         move_group_->execute(ready_plan);
                         RCLCPP_INFO(this->get_logger(), "Returned to ready");
                     }
+                    move_group_->setStartStateToCurrentState();
+                    
+                    // Discard any stale predictions that arrived while blocking for the swing execution
+                    new_target_ = false;
                 } else {
+                    move_group_->clearPathConstraints();
                     RCLCPP_WARN(this->get_logger(),
                         "Planning failed (code %d) for target (%.3f, %.3f, %.3f)",
                         result.val, target.position.x, target.position.y, target.position.z);
@@ -159,37 +212,35 @@ private:
 
     void ballCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg)
     {
-        // Adapter for vision space to ROS space
-        // Vision uses: X = Right, Y = Up, Z = Deep
-        //ROS uses: X = Forward, Y = Left, Z = Up
-
         geometry_msgs::msg::PointStamped rep103_msg = *msg;
-        rep103_msg.point.x = -msg->point.z;
-        rep103_msg.point.y = -msg->point.x;
-        rep103_msg.point.z = msg->point.y;
         
-        // Transform predicted ball position into world frame
+        // The vision system and trajectory node operate in the "world" frame
+        // (X=Right, Y=Up, Z=Towards Robot). The TF tree's static transform 
+        // handles the math to convert this to the robot's Z-up "root" frame.
+        rep103_msg.header.frame_id = "world";
+    
+        // Flip the Z-coordinate (depth). The trajectory node outputs negative Z 
+        // for Marty's side. Flipping it ensures the IK solver projects the target 
+        // forward toward the net instead of wrapping backwards.
+        rep103_msg.point.z = -rep103_msg.point.z;
+
+        // Transform into the robot's base frame (root)
         geometry_msgs::msg::PointStamped in_base;
         try {
-            // Transform into 'root' frame (the URDF base link, which equals MoveIt's
-            // planning frame 'world' via the fixed virtual joint — identity transform).
-            // 'world' is not published to TF by move_group for fixed virtual joints,
-            // so we use 'root' which is always present in the TF tree.
-            tf_buffer_->transform(rep103_msg, in_base, "root",
-                tf2::durationFromSec(0.05));
+            tf_buffer_->transform(rep103_msg, in_base, "root", tf2::durationFromSec(0.05));
         } catch (const tf2::TransformException & e) {
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                "TF transform failed: %s", e.what());
-            return;
+            // If running in the standalone demo, the static transform isn't launched.
+            // Emulate the actual system transform: 0 0 -1.4732 0 0 -1.5708 world root
+            RCLCPP_WARN_ONCE(this->get_logger(), "TF missing. Applying hardcoded demo transform.");
+            in_base = rep103_msg;
+            in_base.point.x = rep103_msg.point.x;
+            in_base.point.y = -rep103_msg.point.z - 1.4732;
+            in_base.point.z = rep103_msg.point.y;
+            in_base.header.frame_id = "root";
         }
 
-        // Reject targets with clearly invalid coordinates (e.g. trajectory fit blowup)
-        if (std::abs(in_base.point.x) > 5.0 ||
-            std::abs(in_base.point.y) > 5.0 ||
-            std::abs(in_base.point.z) > 5.0) {
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                "Rejecting out-of-range target (%.1f, %.1f, %.1f) — trajectory fit may be invalid",
-                in_base.point.x, in_base.point.y, in_base.point.z);
+        // 3. Safety Reject
+        if (std::abs(in_base.point.x) > 5.0 || std::abs(in_base.point.y) > 5.0 || std::abs(in_base.point.z) > 5.0) {
             return;
         }
 

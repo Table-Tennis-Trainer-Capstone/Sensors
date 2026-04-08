@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <cstring>
 #include <cstdint>
+#include <sstream>
+#include <iomanip>
 
 // ---------------------------------------------------------------------------
 // Packet layout (little-endian, packed)
@@ -124,7 +126,12 @@ private:
         if (sent < 0) {
             RCLCPP_WARN(this->get_logger(), "UDP send failed");
         } else {
-            RCLCPP_DEBUG(this->get_logger(), "Sent packet seq=%d joints=%d", pkt.seq, n);
+            std::ostringstream ss;
+            for (uint8_t i = 0; i < n; i++) {
+                ss << std::fixed << std::setprecision(3) << pkt.positions[i] << " ";
+            }
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
+                "Sent UDP [seq=%3d] joints: [ %s]", pkt.seq, ss.str().c_str());
         }
     }
 

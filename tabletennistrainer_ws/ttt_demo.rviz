@@ -9,7 +9,7 @@ Panels:
         - /MotionPlanning1/Planning Request1
         - /MotionPlanning1/Planned Path1
       Splitter Ratio: 0.5
-    Tree Height: 152
+    Tree Height: 146
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -90,6 +90,11 @@ Visualization Manager:
           Show Trail: false
           Value: true
         root:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        table_center:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -178,6 +183,11 @@ Visualization Manager:
             Show Axes: false
             Show Trail: false
             Value: true
+          table_center:
+            Alpha: 1
+            Show Axes: false
+            Show Trail: false
+            Value: true
           table_surface:
             Alpha: 1
             Show Axes: false
@@ -208,7 +218,7 @@ Visualization Manager:
         Joint Violation Color: 255; 0; 255
         Planning Group: armgroup
         Query Goal State: true
-        Query Start State: false
+        Query Start State: true
         Show Workspace: false
         Start State Alpha: 1
         Start State Color: 0; 255; 0
@@ -269,6 +279,11 @@ Visualization Manager:
             Show Axes: false
             Show Trail: false
             Value: true
+          table_center:
+            Alpha: 1
+            Show Axes: false
+            Show Trail: false
+            Value: true
           table_surface:
             Alpha: 1
             Show Axes: false
@@ -278,7 +293,7 @@ Visualization Manager:
         Show Robot Collision: false
         Show Robot Visual: true
       Value: true
-      Velocity_Scaling_Factor: 0.1
+      Velocity_Scaling_Factor: 0.5
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -323,7 +338,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 1.9632383584976196
+      Distance: 2.9503543376922607
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -338,24 +353,24 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.40999868512153625
+      Pitch: 0.8597967624664307
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.093183994293213
+      Yaw: 5.3463544845581055
     Saved: ~
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 919
+  Height: 898
   Hide Left Dock: false
   Hide Right Dock: false
   MotionPlanning:
     collapsed: false
   MotionPlanning - Trajectory Slider:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000100000000000002e100000350fc0200000004fb00000044004d006f00740069006f006e0050006c0061006e006e0069006e00670020002d0020005400720061006a006500630074006f0072007900200053006c00690064006500720000000000ffffffff0000004800fffffffb0000001c004d006f00740069006f006e0050006c0061006e006e0069006e0067010000002c0000019c0000018700fffffffb000000100044006900730070006c00610079007301000001c9000000e7000000e300fffffffb0000000a0056006900650077007301000002b1000000cb000000c600ffffff000002dc0000035000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000100000000000002e10000033bfc0200000004fb00000044004d006f00740069006f006e0050006c0061006e006e0069006e00670020002d0020005400720061006a006500630074006f0072007900200053006c00690064006500720000000000ffffffff0000004800fffffffb0000001c004d006f00740069006f006e0050006c0061006e006e0069006e0067010000002c000001920000018700fffffffb000000100044006900730070006c00610079007301000001bf000000e1000000e100fffffffb0000000a0056006900650077007301000002a1000000c6000000c600ffffff000002dc0000033b00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
   Width: 1470
   X: 0
-  Y: 37
+  Y: 38

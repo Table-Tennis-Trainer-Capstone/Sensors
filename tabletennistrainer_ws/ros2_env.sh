@@ -11,7 +11,6 @@ fi
 export ROS_DOMAIN_ID=43
 unset CYCLONEDDS_URI
 export ROS_LOCALHOST_ONLY=1
-export DYLD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${DYLD_LIBRARY_PATH:-}"
 
 echo "ROS_DOMAIN_ID = $ROS_DOMAIN_ID"
 echo "ROS_LOCALHOST_ONLY = 1 (Local loopback only)"

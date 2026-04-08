@@ -1,5 +1,33 @@
 <robot name="mainarmass">
     <material name="black"><color rgba="0.529 0.568 0.6 1" /></material>
+    <material name="orange"><color rgba="1.0 0.5 0.0 1.0" /></material>
+    <material name="table_color"><color rgba="0.1 0.2 0.3 0.8" /></material>
+
+    <link name="table_center">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry><sphere radius="0.05"/></geometry>
+            <material name="orange" />
+        </visual>
+    </link>
+
+    <link name="table_surface">
+        <visual>
+            <origin xyz="-1.37 0.0 -0.01" rpy="0.0 0.0 0.0" />
+            <geometry><box size="2.74 1.52 0.02" /></geometry>
+            <material name="table_color" />
+        </visual>
+        <collision>
+            <origin xyz="-1.37 0.0 -0.01" rpy="0 0 0" />
+            <geometry><box size="2.74 1.52 0.02" /></geometry>
+        </collision>
+    </link>
+
+    <joint name="center_to_table" type="fixed">
+        <parent link="table_center" />
+        <child link="table_surface" />
+        <origin xyz="0 0 0" rpy="0 0 0" /> 
+    </joint>
 
     <link name="root">
         <visual>
@@ -8,6 +36,19 @@
             <material name="black" />
         </visual>
     </link>
+
+    <joint name="center_to_robot" type="fixed">
+        <parent link="table_center" />
+        <child link="root" />
+        <origin xyz="-1.37 0 0" rpy="0 0 3.14159" /> 
+    </joint>
+
+    <joint name="root_to_base" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <parent link="root" />
+        <child link="Base" />
+    </joint>
+
 
     <link name="Base">
         <inertial>
@@ -111,21 +152,6 @@
         </collision>
     </link>
 
-    <link name="table_surface">
-        <visual>
-            <origin xyz="0.0 0.0 -0.01" rpy="0.0 0.0 0.0" />
-            <geometry>
-            <box size="2.0 2.0 0.02" /> </geometry>
-            <material name="black" />
-  	</visual>
-        <collision>
-            <origin xyz="0 0 -0.01" rpy="0 0 0" />
-                <geometry>
-                    <box size="2.0 2.0 0.02" />
-                </geometry>
-        </collision>
-    </link>
-
     <link name="paddle_tcp">
         <visual>
             <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
@@ -134,20 +160,9 @@
         </visual>
     </link>
 
-<joint name="table_to_base" type="fixed">
-  <parent link="Base" />
-  <child link="table_surface" />
-  <origin xyz="0 0 0" rpy="0 0 0" /> </joint>
-
-    <joint name="root_to_base" type="fixed">
-        <origin xyz="0 0 0" rpy="0 0 0" />
-        <parent link="root" />
-        <child link="Base" />
-    </joint>
-
     <joint name="BaseRotate_0" type="continuous">
         <origin xyz="0 0 0" rpy="0.01712 0.04808 -0.38348" />
-        <axis xyz="0.04806 -0.01710 -0.99869" />
+        <axis xyz="0.04806 -0.01710 0.99869" /> 
         <parent link="Base" />
         <child link="Shoulder" />
         <limit effort="35.0" velocity="5" />
@@ -166,7 +181,6 @@
         <axis xyz="0.93476 -0.35525 0" />
         <parent link="UpperArm" />
         <child link="Forearm" />
-        <!-- home=-2.59 rad; physical travel ~160° from home toward positive -->
         <limit lower="-4.1888" upper="0.5236" effort="12.0" velocity="5" />
     </joint>
 
@@ -175,7 +189,6 @@
         <axis xyz="0.93476 -0.35525 0" />
         <parent link="Forearm" />
         <child link="Wrist" />
-        <!-- home=2.33 rad; physical travel ~180° -->
         <limit lower="-2.967" upper="0.2618" effort="0.75" velocity="5" />
     </joint>
 
@@ -190,6 +203,6 @@
     <joint name="paddle_to_tcp" type="fixed">
         <parent link="Paddle" />
         <child link="paddle_tcp" />
-	<origin xyz="-0.033 -0.105 0.149" rpy="-0.587 0.245 -1.933" />
+        <origin xyz="-0.033 -0.105 0.149" rpy="-0.587 0.245 -1.933" />
     </joint>
 </robot>
