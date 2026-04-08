@@ -22,8 +22,8 @@ public:
         this->declare_parameter("right_camera.pitch", -0.785);
         this->declare_parameter("right_camera.yaw", 0.0);
         
-        this->declare_parameter("robot_base.x", 0.0);
-        this->declare_parameter("robot_base.y", -1.0);
+        this->declare_parameter("robot_base.x", -1.4732);
+        this->declare_parameter("robot_base.y", 0.0);
         this->declare_parameter("robot_base.z", 0.0);
         this->declare_parameter("robot_base.roll", 0.0);
         this->declare_parameter("robot_base.pitch", 0.0);

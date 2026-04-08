@@ -43,7 +43,7 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             name='table_to_robot_base',
-            arguments=['0', '0', '-1.4732', '0', '0', '0', 'table', 'robot_base'],
+            arguments=['0', '0', '0', '0', '0', '0', 'table', 'robot_base'],
         ),
 
         # Bridge URDF root link to TF tree (robot_base → root, identity transform)

@@ -159,6 +159,15 @@ private:
 
     void ballCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg)
     {
+        // Adapter for vision space to ROS space
+        // Vision uses: X = Right, Y = Up, Z = Deep
+        //ROS uses: X = Forward, Y = Left, Z = Up
+
+        geometry_msgs::msg::PointStamped rep103_msg = *msg;
+        rep103_msg.point.x = -msg->point.z;
+        rep103_msg.point.y = -msg->point.x;
+        rep103_msg.point.z = msg->point.y;
+        
         // Transform predicted ball position into world frame
         geometry_msgs::msg::PointStamped in_base;
         try {

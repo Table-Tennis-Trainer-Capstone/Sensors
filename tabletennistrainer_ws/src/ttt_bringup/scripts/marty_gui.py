@@ -1730,7 +1730,7 @@ if __name__ == "__main__":
 
     streamer = WebStreamer()
     streamer.start()
-    SystemLauncher().start()
+    # SystemLauncher().start()
     worker = ROSWorker(streamer)
     streamer.ros_worker = worker
     worker.start()
