@@ -176,7 +176,7 @@
         <parent link="Forearm" />
         <child link="Wrist" />
         <!-- home=2.33 rad; physical travel ~180° -->
-        <limit lower="-2.967" upper="2.50" effort="0.75" velocity="5" />
+        <limit lower="-2.967" upper="0.2618" effort="0.75" velocity="5" />
     </joint>
 
     <joint name="PaddleRotate_0" type="continuous">
