@@ -65,5 +65,5 @@ PARAMS = {
     'update_rate_hz':     60.0,   # How often the control loop checks for new ball targets
     'planning_time_s':     0.05,   # Max time MoveIt spends finding a motion plan (keep short for real-time)
     'return_delay_ms':     50,   # Time (ms) to hold the swing position before returning home
-    'speed_multiplier':    4.0,   # Overdrive scaling factor to bypass default URDF velocity limits
+    'speed_multiplier':    1.0,   # Overdrive scaling factor to bypass default URDF velocity limits
 }

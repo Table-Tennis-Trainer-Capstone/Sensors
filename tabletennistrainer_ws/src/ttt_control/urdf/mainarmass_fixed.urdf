@@ -40,7 +40,7 @@
     <joint name="center_to_robot" type="fixed">
         <parent link="table_center" />
         <child link="root" />
-        <origin xyz="-1.37 0 0" rpy="0 0 3.14159" /> 
+        <origin xyz="-1.37 0 0" rpy="0 0 -1.5708" /> 
     </joint>
 
     <joint name="root_to_base" type="fixed">

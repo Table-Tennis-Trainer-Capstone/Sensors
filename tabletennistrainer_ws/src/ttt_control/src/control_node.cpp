@@ -23,7 +23,7 @@ public:
         this->declare_parameter("update_rate_hz",  10.0);
         this->declare_parameter("planning_time_s",  0.1);  // 100ms planning budget
         this->declare_parameter("return_delay_ms",  100);  // delay before returning home after swing
-        this->declare_parameter("speed_multiplier", 4.0);  // Overdrive multiplier to bypass slow URDF limits
+        this->declare_parameter("speed_multiplier", 1.0);  // Overdrive multiplier to bypass slow URDF limits
 
         tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -124,7 +124,7 @@ public:
                 // Prevent the arm from spinning 180 degrees (glitching backwards) by constraining the base joint
                 moveit_msgs::msg::JointConstraint base_constraint;
                 base_constraint.joint_name = "BaseRotate_0";
-                base_constraint.position = -0.785;       // Center of table
+                base_constraint.position = 0.0;          // Center of table
                 base_constraint.tolerance_above = 1.50;  // Widen to ~85 deg to allow reaching extreme right
                 base_constraint.tolerance_below = 1.50;  // Widen to ~85 deg to allow reaching extreme left
                 base_constraint.weight = 1.0;
@@ -134,17 +134,17 @@ public:
                 moveit_msgs::msg::JointConstraint paddle_constraint;
                 paddle_constraint.joint_name = "PaddleRotate_0";
                 paddle_constraint.position = 0.0;        // Ready state angle (flat)
-                paddle_constraint.tolerance_above = 0.15;
-                paddle_constraint.tolerance_below = 0.15;
-                paddle_constraint.weight = 1.0;
+                paddle_constraint.tolerance_above = 3.14; // Relaxed for maximum reachability
+                paddle_constraint.tolerance_below = 3.14;
+                paddle_constraint.weight = 0.1;
                 constraints.joint_constraints.push_back(paddle_constraint);
 
                 // Keep the wrist near its "ready" angle so the paddle face stays vertical
                 moveit_msgs::msg::JointConstraint wrist_constraint;
                 wrist_constraint.joint_name = "WristRotate_0";
                 wrist_constraint.position = -1.08;       // Ready state angle
-                wrist_constraint.tolerance_above = 0.7;  // Allow flex to reach different depths/heights
-                wrist_constraint.tolerance_below = 0.7;
+                wrist_constraint.tolerance_above = 3.14;  // Completely relax to stop Error -27
+                wrist_constraint.tolerance_below = 3.14;
                 wrist_constraint.weight = 0.8;
                 constraints.joint_constraints.push_back(wrist_constraint);
 
@@ -212,37 +212,28 @@ private:
 
     void ballCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg)
     {
-        geometry_msgs::msg::PointStamped rep103_msg = *msg;
-        
-        // The vision system and trajectory node operate in the "world" frame
-        // (X=Right, Y=Up, Z=Towards Robot). The TF tree's static transform 
-        // handles the math to convert this to the robot's Z-up "root" frame.
-        rep103_msg.header.frame_id = "world";
-    
-        // Flip the Z-coordinate (depth). The trajectory node outputs negative Z 
-        // for Marty's side. Flipping it ensures the IK solver projects the target 
-        // forward toward the net instead of wrapping backwards.
-        rep103_msg.point.z = -rep103_msg.point.z;
-
-        // Transform into the robot's base frame (root)
         geometry_msgs::msg::PointStamped in_base;
-        try {
-            tf_buffer_->transform(rep103_msg, in_base, "root", tf2::durationFromSec(0.05));
-        } catch (const tf2::TransformException & e) {
-            // If running in the standalone demo, the static transform isn't launched.
-            // Emulate the actual system transform: 0 0 -1.4732 0 0 -1.5708 world root
-            RCLCPP_WARN_ONCE(this->get_logger(), "TF missing. Applying hardcoded demo transform.");
-            in_base = rep103_msg;
-            in_base.point.x = rep103_msg.point.x;
-            in_base.point.y = -rep103_msg.point.z - 1.4732;
-            in_base.point.z = rep103_msg.point.y;
-            in_base.header.frame_id = "root";
-        }
+        in_base.header.stamp = msg->header.stamp;
+        in_base.header.frame_id = "root";
+
+        // The vision system "world" frame is LEFT-HANDED: X=Right, Y=Up, Z=Forward.
+        // The robot "root" frame is RIGHT-HANDED: X=Right, Y=Forward, Z=Up.
+        // tf2 cannot safely transform left-handed to right-handed without inverting an axis
+        // and causing the arm to swing the wrong way. We manually map the coordinates here.
+        
+        in_base.point.x = msg->point.x;                  // Lateral matches
+        in_base.point.y = msg->point.z + 1.4732;         // World Depth (+Z) maps to Root Forward (+Y)
+        in_base.point.z = msg->point.y;                  // World Up (+Y) maps to Root Up (+Z)
 
         // 3. Safety Reject
         if (std::abs(in_base.point.x) > 5.0 || std::abs(in_base.point.y) > 5.0 || std::abs(in_base.point.z) > 5.0) {
             return;
         }
+
+        RCLCPP_INFO(this->get_logger(),
+            "\n== TARGET MAPPED ==\n WORLD: X=%+.3f (right), Y=%+.3f (height), Z=%+.3f (depth)\n ROOT:  X=%+.3f (right), Y=%+.3f (forward), Z=%+.3f (height)",
+            msg->point.x, msg->point.y, msg->point.z,
+            in_base.point.x, in_base.point.y, in_base.point.z);
 
         std::lock_guard<std::mutex> lock(mutex_);
         latest_target_.position.x  = in_base.point.x;

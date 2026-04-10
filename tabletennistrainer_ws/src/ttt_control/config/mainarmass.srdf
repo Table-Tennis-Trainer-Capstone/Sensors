@@ -25,14 +25,14 @@
     
     <group_state name="ready" group="armgroup">
         <joint name="BaseRotate_0" value="-0.7853"/>
-        <joint name="ForeArmRotate_0" value="-0.0686"/>
+        <joint name="ForeArmRotate_0" value="-0.0"/>
         <joint name="PaddleRotate_0" value="0"/>
-        <joint name="UpperArmRotate_0" value="-0.2615"/>
-        <joint name="WristRotate_0" value="-1.0803"/>
+        <joint name="UpperArmRotate_0" value="0.4319"/>
+        <joint name="WristRotate_0" value="-0.2616"/>
     </group_state>
 
     <group_state name="swing_center" group="armgroup">
-        <joint name="BaseRotate_0" value="-0.785"/>
+        <joint name="BaseRotate_0" value="0.0"/>
         <joint name="ForeArmRotate_0" value="-0.0686"/>
         <joint name="PaddleRotate_0" value="0"/>
         <joint name="UpperArmRotate_0" value="-0.2615"/>
@@ -40,7 +40,7 @@
     </group_state>
     
     <group_state name="swing_left" group="armgroup">
-        <joint name="BaseRotate_0" value="-1.57"/>
+        <joint name="BaseRotate_0" value="-0.785"/>
         <joint name="ForeArmRotate_0" value="-0.0686"/>
         <joint name="PaddleRotate_0" value="0"/>
         <joint name="UpperArmRotate_0" value="-0.2615"/>
@@ -48,7 +48,7 @@
     </group_state>
     
     <group_state name="swing_right" group="armgroup">
-        <joint name="BaseRotate_0" value="0.0"/>
+        <joint name="BaseRotate_0" value="0.785"/>
         <joint name="ForeArmRotate_0" value="-0.0686"/>
         <joint name="PaddleRotate_0" value="0"/>
         <joint name="UpperArmRotate_0" value="-0.2615"/>

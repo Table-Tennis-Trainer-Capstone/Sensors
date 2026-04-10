@@ -1,6 +1,7 @@
 import sys, cv2, numpy as np, subprocess, os, signal, time, threading, logging, json, math
 from collections import deque
 from flask import Flask, Response, render_template_string, request
+from rclpy.duration import Duration
 
 # --- 1. DDS CONFIG ---
 cyc_b = """<?xml version="1.0" encoding="UTF-8" ?>
@@ -30,6 +31,8 @@ from sensor_msgs.msg import CompressedImage, JointState
 from geometry_msgs.msg import PointStamped
 from std_msgs.msg import String, Int32
 from ttt_msgs.msg import BallDetection
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
 
 import sys as _sys, re as _re
 _sys.path.insert(0, '/home/capstone-nano2/Sensors/tabletennistrainer_ws/src/ttt_bringup/launch')
@@ -252,7 +255,7 @@ _HTML_PAGE = """<!DOCTYPE html>
     </div>
     <div class="vis-box">
       <div class="vis-title">SIDE VIEW (Y-Z)</div>
-      <canvas id="sideCanvas" width="600" height="350"></canvas>
+      <canvas id="sideCanvas" width="600" height="400"></canvas>
     </div>
   </div>
 
@@ -264,7 +267,8 @@ _HTML_PAGE = """<!DOCTYPE html>
       Z:<input id="arm-z" type="number" value="-1.05" step="0.05" style="width:60px;background:#222;color:#00ffcc;border:1px solid #444;font-size:12px;margin:0 4px;" title="Depth from net (m, negative=robot side)">
     </span>
     <button class="btn btn-test" onclick="sendArmPoint()" style="margin-left:6px;">MOVE</button>
-    <button class="btn" style="background:#1a3a1a;border:1px solid #0a0;color:#0f0;margin-left:12px;" onclick="fetch('/api/arm_home',{method:'POST'})">GO HOME</button>
+    <button class="btn" style="background:#1a3a1a;border:1px solid #0a0;color:#0f0;margin-left:12px;" onclick="fetch('/api/arm_ready',{method:'POST'})">READY</button>
+    <button class="btn" style="background:#1a3a1a;border:1px solid #0a0;color:#0f0;margin-left:4px;" onclick="fetch('/api/arm_home',{method:'POST'})">HOME</button>
   </div>
 
   <div class="topics-panel">
@@ -301,12 +305,13 @@ _HTML_PAGE = """<!DOCTYPE html>
       tCtx.clearRect(0,0,w,h); sCtx.clearRect(0,0,w,h);
 
       // MAPPINGS:  TopView = X vs Z  |  SideView = Y vs Z
-      // Z range: -2m to +2m fits in w=600px -> Scale = 150 px/m
+      // Z range: -2m to +2m fits in w=600px -> Scale = 130 px/m
       const SCALE = 130; 
-      const czTop = w/2;    // Z=0 (net) is horizontally centered
-      const cxTop = h/2;    // X=0 (table center) is vertically centered
-      const czSide = w * 0.75;  // shift right so robot at Z=-1.47 is visible on left
-      const cySide = h - 60;   // Y=0 (table surface) is near the bottom
+      const czTop = w * 0.50;    // Net (Z=0) perfectly centered horizontally
+      const cxTop = h * 0.50;    // Table center line (X=0) perfectly centered vertically
+      
+      const czSide = w * 0.65;   // Shift right so the robot at Z=-1.37 fits on the left
+      const cySide = h - 40;     // Push the table surface down to the floor of the canvas
 
       // Helpers
       const T_X = (x) => cxTop + (x * SCALE);
@@ -419,105 +424,6 @@ _HTML_PAGE = """<!DOCTYPE html>
         sCtx.fillStyle = stageColors[phase] || '#888';
         sCtx.font = 'bold 13px Consolas';
         sCtx.fillText(stageNames[phase] || '', 10, 18);
-      }
-
-      // 4. Draw Robot Arm
-      // UpperArmRotate: positive = elbow toward table (+Z). Sign flipped from raw URDF angle.
-      // ForeArm/Wrist: negative = segment extends toward table, matching URDF convention.
-      {
-        let jt = d.joints || {};
-        let ja0 = (jt['BaseRotate_0']     !== undefined) ? jt['BaseRotate_0']     : 0;
-        let ja1 = (jt['UpperArmRotate_0'] !== undefined) ? jt['UpperArmRotate_0'] : 0;
-        let ja2 = (jt['ForeArmRotate_0']  !== undefined) ? jt['ForeArmRotate_0']  : -2.59;
-        let ja3 = (jt['WristRotate_0']    !== undefined) ? jt['WristRotate_0']    : 2.33;
-
-        const BE=0.0, BH=0.105, LUA=0.455, LFA=0.434, LWR=0.050, ARZ=-1.4732;
-        // UpperArm sign is flipped: positive ja1 moves elbow toward table (+Z)
-        function aseg(cy,cz,L,a){ return {y:cy+L*Math.cos(a), z:cz-L*Math.sin(a)}; }
-        const sho = {y:BE+BH, z:ARZ};
-        const elb = aseg(sho.y, sho.z, LUA, -ja1);        // negate ja1: +ja1 = toward table
-        const wri = aseg(elb.y, elb.z, LFA, -ja1+ja2);
-        const pad = aseg(wri.y, wri.z, LWR, -ja1+ja2+ja3);
-
-        const ARM_C = ['#00aaff','#00ffcc','#ffaa00'];
-        const MAX_R = (LUA+LFA+LWR) * SCALE;  // max reach in pixels
-
-        // ─ Side view reach envelope ─
-        sCtx.save();
-        sCtx.setLineDash([4,4]);
-        sCtx.strokeStyle='rgba(255,255,255,0.12)'; sCtx.lineWidth=1;
-        // Arc centred at shoulder, upper half (arm swings from backward through up to forward)
-        sCtx.beginPath();
-        sCtx.arc(S_Z(sho.z), S_Y(sho.y), MAX_R, Math.PI, 0, false);
-        sCtx.stroke();
-        sCtx.setLineDash([]);
-        sCtx.restore();
-
-        // ─ Side view arm ─
-        // Base anchor at table surface
-        sCtx.strokeStyle='#555'; sCtx.lineWidth=8; sCtx.lineCap='round';
-        sCtx.beginPath(); sCtx.moveTo(S_Z(ARZ),S_Y(0)); sCtx.lineTo(S_Z(ARZ),S_Y(BH)); sCtx.stroke();
-        // Links
-        [[sho,elb,0],[elb,wri,1],[wri,pad,2]].forEach(function(seg){
-          sCtx.strokeStyle=ARM_C[seg[2]]; sCtx.lineWidth=5; sCtx.lineCap='round';
-          sCtx.beginPath(); sCtx.moveTo(S_Z(seg[0].z),S_Y(seg[0].y)); sCtx.lineTo(S_Z(seg[1].z),S_Y(seg[1].y)); sCtx.stroke();
-        });
-        // Joints
-        [sho,elb,wri,pad].forEach(function(p,i){
-          sCtx.fillStyle=ARM_C[Math.min(i,2)]||'#888';
-          sCtx.beginPath(); sCtx.arc(S_Z(p.z),S_Y(p.y),5,0,Math.PI*2); sCtx.fill();
-        });
-
-        // ─ Top view reach envelope ─
-        tCtx.save();
-        tCtx.setLineDash([4,4]);
-        tCtx.strokeStyle='rgba(255,255,255,0.12)'; tCtx.lineWidth=1;
-        tCtx.beginPath();
-        tCtx.arc(T_Z(ARZ), T_X(0), MAX_R, 0, Math.PI*2);
-        tCtx.stroke();
-        tCtx.setLineDash([]);
-        tCtx.restore();
-
-        // ─ Top view arm ─
-        // Forward projection of each segment (flipped ja1 convention)
-        const uaf=LUA*Math.sin(ja1), faf=-LFA*Math.sin(-ja1+ja2), wrf=-LWR*Math.sin(-ja1+ja2+ja3);
-        const topPts=[
-          {z:ARZ, x:0},
-          {z:ARZ+uaf*Math.cos(ja0),         x:uaf*Math.sin(ja0)},
-          {z:ARZ+(uaf+faf)*Math.cos(ja0),    x:(uaf+faf)*Math.sin(ja0)},
-          {z:ARZ+(uaf+faf+wrf)*Math.cos(ja0),x:(uaf+faf+wrf)*Math.sin(ja0)},
-        ];
-        // Circular base
-        tCtx.strokeStyle='#666'; tCtx.lineWidth=2;
-        tCtx.beginPath(); tCtx.arc(T_Z(ARZ), T_X(0), 12, 0, Math.PI*2); tCtx.stroke();
-        tCtx.fillStyle='#333';
-        tCtx.beginPath(); tCtx.arc(T_Z(ARZ), T_X(0), 12, 0, Math.PI*2); tCtx.fill();
-        // Links
-        for(let ti=0;ti<3;ti++){
-          tCtx.strokeStyle=ARM_C[ti]; tCtx.lineWidth=5; tCtx.lineCap='round';
-          tCtx.beginPath(); tCtx.moveTo(T_Z(topPts[ti].z),T_X(topPts[ti].x));
-          tCtx.lineTo(T_Z(topPts[ti+1].z),T_X(topPts[ti+1].x)); tCtx.stroke();
-        }
-        // Joints
-        topPts.slice(1).forEach(function(p,i){
-          tCtx.fillStyle=ARM_C[Math.min(i,2)]||'#888';
-          tCtx.beginPath(); tCtx.arc(T_Z(p.z),T_X(p.x),5,0,Math.PI*2); tCtx.fill();
-        });
-
-        // ─ Paddle trail ─
-        padTrailSide.push({z: pad.z, y: pad.y});
-        padTrailTop.push({z: topPts[3].z, x: topPts[3].x});
-        if(padTrailSide.length > PAD_TRAIL_LEN){ padTrailSide.shift(); padTrailTop.shift(); }
-        padTrailSide.forEach(function(p,i){
-          var alpha = (i / padTrailSide.length) * 0.7;
-          sCtx.fillStyle = 'rgba(255,180,0,'+alpha+')';
-          sCtx.beginPath(); sCtx.arc(S_Z(p.z), S_Y(p.y), 3, 0, Math.PI*2); sCtx.fill();
-        });
-        padTrailTop.forEach(function(p,i){
-          var alpha = (i / padTrailTop.length) * 0.7;
-          tCtx.fillStyle = 'rgba(255,180,0,'+alpha+')';
-          tCtx.beginPath(); tCtx.arc(T_Z(p.z), T_X(p.x), 3, 0, Math.PI*2); tCtx.fill();
-        });
       }
     }
 
@@ -784,249 +690,6 @@ function sendArmPoint(){
   fetch('/api/test_arm', {method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({x: x, y: y, z: z})});
 }
-
-function _unusedArmDiagram_REMOVED(d) { return; // arm drawing merged into drawVisualizations
-
-  var SC = aSide.getContext('2d');
-  var TC = aTop.getContext('2d');
-  var W = aSide.width, H = aSide.height;
-
-  SC.clearRect(0,0,W,H);
-  TC.clearRect(0,0,W,H);
-
-  // Joint angles (0 if not yet received)
-  var j = d.joints || {};
-  var a0 = (j['BaseRotate_0']     !== undefined) ? j['BaseRotate_0']     : 0;
-  var a1 = (j['UpperArmRotate_0'] !== undefined) ? j['UpperArmRotate_0'] : 0;
-  var a2 = (j['ForeArmRotate_0']  !== undefined) ? j['ForeArmRotate_0']  : 0;
-  var a3 = (j['WristRotate_0']    !== undefined) ? j['WristRotate_0']    : 0;
-  var a4 = (j['PaddleRotate_0']   !== undefined) ? j['PaddleRotate_0']   : 0;
-
-  // ── FK CONVENTION ──────────────────────────────────────────────────────────
-  // Arm zero position = upper arm pointing straight UP (+Y).
-  // Pitch angle convention (rotation around the arm's lateral axis ≈ X):
-  //   dy =  L * cos(a)   →  a=0: +L (up),   a=−90°: 0,      a=−180°: −L (down)
-  //   dz = −L * sin(a)   →  a=0:  0,         a=−90°: +L (toward table), a=−180°: 0
-  // So negative pitch swings the arm TOWARD the table and eventually downward.
-  // At the home position (a1≈−2.02 rad ≈ −116°):
-  //   dy ≈ −0.19 (slightly below horizontal), dz ≈ +0.91 (strongly toward table) ✓
-  //
-  // Robot mounts on a ~0.5m pedestal above the table surface. This is consistent
-  // with the IK coordinates (target y_table=0.15 → y_robot=1.15, offset=1.0m).
-  // For visualization we use BASE_ELEV=0.5m as the pedestal height.
-
-  var BASE_ELEV = 0.5;   // pedestal height above table surface (m)
-  var BASE_H    = 0.105; // URDF shoulder joint height above pedestal top (m)
-  var L_UA = 0.455;      // upper arm length (m)
-  var L_FA = 0.434;      // forearm length (m)
-  var L_WR = 0.050;      // wrist-to-paddle length (m)
-
-  // In TABLE frame: Y=0 is table surface, Z=0 is net, robot base at Z=−1.4732
-  var RZ = -1.4732;
-
-  // Helper: compute arm segment endpoint given current endpoint and pitch angle
-  function seg(curY, curZ, L, angle) {
-    return { y: curY + L * Math.cos(angle), z: curZ - L * Math.sin(angle) };
-  }
-
-  // Build joint positions in table frame
-  var base     = { y: BASE_ELEV,          z: RZ };            // pedestal top = robot base
-  var shoulder = { y: BASE_ELEV + BASE_H, z: RZ };            // shoulder joint
-  var elbow    = seg(shoulder.y, shoulder.z, L_UA, a1);
-  var wrist    = seg(elbow.y,    elbow.z,    L_FA, a1+a2);
-  var paddle   = seg(wrist.y,    wrist.z,    L_WR, a1+a2+a3);
-
-  // ── SIDE VIEW canvas (Y up, Z right = toward table) ──────────────────────
-  var SCALE = 150;  // px/m
-
-  // Place table surface (y=0) at 82% of canvas height; robot base Z at 12% of canvas width
-  var OY = H * 0.82;   // canvas-y for world y=0
-  var OZ = W * 0.12;   // canvas-x for world z=RZ
-
-  var sz = function(wz) { return OZ + (wz - RZ) * SCALE; };
-  var sy = function(wy) { return OY - wy * SCALE; };
-
-  // Grid
-  SC.strokeStyle = '#181818'; SC.lineWidth = 1;
-  for(var gz = -2.0; gz <= 1.5; gz += 0.25) {
-    SC.beginPath(); SC.moveTo(sz(gz), sy(-0.15)); SC.lineTo(sz(gz), sy(1.2)); SC.stroke();
-  }
-  for(var gy = -0.1; gy <= 1.2; gy += 0.25) {
-    SC.beginPath(); SC.moveTo(sz(-2.0), sy(gy)); SC.lineTo(sz(1.5), sy(gy)); SC.stroke();
-  }
-
-  // Table surface
-  SC.strokeStyle = '#1a5c1a'; SC.lineWidth = 3;
-  SC.beginPath(); SC.moveTo(sz(-1.37), sy(0)); SC.lineTo(sz(1.37), sy(0)); SC.stroke();
-  // Net post
-  SC.strokeStyle = '#2a4488'; SC.lineWidth = 2;
-  SC.beginPath(); SC.moveTo(sz(0), sy(0)); SC.lineTo(sz(0), sy(0.1525)); SC.stroke();
-  // Floor reference
-  SC.strokeStyle = '#333'; SC.lineWidth = 1;
-  SC.beginPath(); SC.moveTo(0, sy(-0.05)); SC.lineTo(W, sy(-0.05)); SC.stroke();
-
-  // Pedestal / mounting post
-  SC.strokeStyle = '#444'; SC.lineWidth = 10; SC.lineCap = 'butt';
-  SC.beginPath(); SC.moveTo(sz(RZ), sy(0)); SC.lineTo(sz(RZ), sy(BASE_ELEV)); SC.stroke();
-  // Small top cap
-  SC.strokeStyle = '#555'; SC.lineWidth = 14;
-  SC.beginPath(); SC.moveTo(sz(RZ)-7, sy(BASE_ELEV)); SC.lineTo(sz(RZ)+7, sy(BASE_ELEV)); SC.stroke();
-
-  // Draw arm links
-  var LINK_COLORS = ['#00aaff', '#00ffcc', '#ffaa00', '#ff55aa'];
-  var JOINT_COLORS = ['#888', '#00aaff', '#00ffcc', '#ffaa00', '#ff55aa'];
-  var JOINT_LABELS = ['Base', 'Shoulder', 'Elbow', 'Wrist', 'Paddle'];
-  var spts = [base, shoulder, elbow, wrist, paddle];
-
-  for(var li = 1; li < spts.length; li++) {
-    SC.strokeStyle = li === 1 ? '#557' : LINK_COLORS[li-2] || '#888';
-    SC.lineWidth = (li < 4) ? 6 : 3;
-    SC.lineCap = 'round';
-    SC.beginPath();
-    SC.moveTo(sz(spts[li-1].z), sy(spts[li-1].y));
-    SC.lineTo(sz(spts[li].z),   sy(spts[li].y));
-    SC.stroke();
-  }
-
-  // Draw joint circles + labels
-  spts.forEach(function(p, i) {
-    if(i === 0) return;  // skip pedestal base, draw shoulder upward
-    SC.fillStyle = JOINT_COLORS[i] || '#fff';
-    SC.beginPath(); SC.arc(sz(p.z), sy(p.y), i===4?5:8, 0, Math.PI*2); SC.fill();
-    if(i < 4) {
-      SC.fillStyle = JOINT_COLORS[i];
-      SC.font = 'bold 10px Consolas';
-      SC.fillText(JOINT_LABELS[i], sz(p.z)+10, sy(p.y)-4);
-    }
-  });
-
-  // Table surface label
-  SC.fillStyle = '#1a5c1a'; SC.font = '10px Consolas';
-  SC.fillText('table surface', sz(-1.30), sy(0)-4);
-  // Net label
-  SC.fillStyle = '#2a4488';
-  SC.fillText('net', sz(0)+4, sy(0.1525)-4);
-
-  // Target / predicted ball
-  if(d.px !== null && d.py !== null && d.pz !== null) {
-    SC.fillStyle = 'rgba(255,50,50,0.85)';
-    SC.beginPath(); SC.arc(sz(d.pz), sy(d.py), 7, 0, Math.PI*2); SC.fill();
-    SC.strokeStyle = '#ff3333'; SC.lineWidth = 1; SC.setLineDash([4,4]);
-    SC.beginPath();
-    SC.moveTo(sz(paddle.z), sy(paddle.y));
-    SC.lineTo(sz(d.pz), sy(d.py));
-    SC.stroke(); SC.setLineDash([]);
-    SC.fillStyle = '#ff5555'; SC.font = 'bold 10px Consolas';
-    SC.fillText('TARGET', sz(d.pz)+8, sy(d.py)-6);
-  }
-
-  // Z-axis tick labels
-  SC.fillStyle = '#333'; SC.font = '9px Consolas';
-  for(var tl = -1.0; tl <= 1.0; tl += 0.5) {
-    SC.fillText(tl.toFixed(1), sz(tl)-8, sy(-0.12));
-  }
-
-  // Joint angle readout panel
-  var panX = W - 148, panY = H - 102;
-  SC.fillStyle = 'rgba(0,0,0,0.6)';
-  SC.fillRect(panX-4, panY-14, 148, 100);
-  var ang_labels = [
-    {lbl:'Base yaw:  '+(a0*180/Math.PI).toFixed(1)+'°', c:'#888'},
-    {lbl:'Shoulder:  '+(a1*180/Math.PI).toFixed(1)+'°', c:'#00aaff'},
-    {lbl:'Elbow:     '+(a2*180/Math.PI).toFixed(1)+'°', c:'#00ffcc'},
-    {lbl:'Wrist:     '+(a3*180/Math.PI).toFixed(1)+'°', c:'#ffaa00'},
-    {lbl:'Paddle:    '+(a4*180/Math.PI).toFixed(1)+'°', c:'#ff55aa'},
-  ];
-  ang_labels.forEach(function(e, i) {
-    SC.fillStyle = e.c; SC.font = '11px Consolas';
-    SC.fillText(e.lbl, panX, panY + i*18);
-  });
-
-  SC.fillStyle = '#444'; SC.font = '10px Consolas';
-  SC.fillText('ARM — SIDE VIEW (Y-Z)', 6, 14);
-
-  // ── TOP VIEW canvas (X across, Z up = toward table) ───────────────────────
-  var TSCALE = 130;
-  var OX_T = W * 0.5;
-  var OZ_T = H * 0.82;
-
-  var tx = function(wx) { return OX_T + wx * TSCALE; };
-  var tz = function(wz) { return OZ_T - (wz - RZ) * TSCALE; };
-
-  // Grid
-  TC.strokeStyle = '#181818'; TC.lineWidth = 1;
-  for(var gx2 = -1.0; gx2 <= 1.0; gx2 += 0.25) {
-    TC.beginPath(); TC.moveTo(tx(gx2), tz(-1.6)); TC.lineTo(tx(gx2), tz(1.5)); TC.stroke();
-  }
-  for(var gz2 = -1.6; gz2 <= 1.5; gz2 += 0.25) {
-    TC.beginPath(); TC.moveTo(tx(-1.1), tz(gz2)); TC.lineTo(tx(1.1), tz(gz2)); TC.stroke();
-  }
-
-  // Table outline
-  TC.strokeStyle = '#1a5c1a'; TC.lineWidth = 3;
-  TC.strokeRect(tx(-0.7625), tz(1.37), 1.525*TSCALE, -(2.74*TSCALE));
-  // Net
-  TC.strokeStyle = '#2a4488'; TC.lineWidth = 2;
-  TC.beginPath(); TC.moveTo(tx(-0.7625), tz(0)); TC.lineTo(tx(0.7625), tz(0)); TC.stroke();
-  // Centre line
-  TC.strokeStyle = '#222'; TC.lineWidth=1; TC.setLineDash([4,4]);
-  TC.beginPath(); TC.moveTo(tx(0), tz(-1.6)); TC.lineTo(tx(0), tz(1.5)); TC.stroke();
-  TC.setLineDash([]);
-
-  // Top-view FK: arm lives in the Y-Z plane, yaw a0 rotates that plane around Y.
-  // In top view: forward reach of each joint = −L*sin(pitch), spread by yaw a0.
-  //   Δx = forward_reach * sin(a0)
-  //   Δz = forward_reach * cos(a0)
-  var ua_fwd = -L_UA * Math.sin(a1);              // >0 when a1<0 ✓
-  var fa_fwd = -L_FA * Math.sin(a1 + a2);
-  var wr_fwd = -L_WR * Math.sin(a1 + a2 + a3);
-
-  var tpts = [
-    {x: 0,   z: RZ},                                                          // base
-    {x: 0,   z: RZ},                                                          // shoulder (same XZ as base)
-    {x: ua_fwd * Math.sin(a0),            z: RZ + ua_fwd * Math.cos(a0)},    // elbow
-    {x: ua_fwd * Math.sin(a0) + fa_fwd * Math.sin(a0), z: RZ + (ua_fwd + fa_fwd) * Math.cos(a0)}, // wrist
-    {x: (ua_fwd+fa_fwd+wr_fwd)*Math.sin(a0), z: RZ + (ua_fwd+fa_fwd+wr_fwd)*Math.cos(a0)},        // paddle
-  ];
-
-  for(var li2 = 1; li2 < tpts.length; li2++) {
-    TC.strokeStyle = li2 === 1 ? '#557' : LINK_COLORS[li2-2] || '#888';
-    TC.lineWidth = li2 < 4 ? 6 : 3; TC.lineCap = 'round';
-    TC.beginPath();
-    TC.moveTo(tx(tpts[li2-1].x), tz(tpts[li2-1].z));
-    TC.lineTo(tx(tpts[li2].x),   tz(tpts[li2].z));
-    TC.stroke();
-  }
-
-  tpts.forEach(function(p, i) {
-    if(i < 2) {
-      // draw robot base marker
-      if(i === 0) {
-        TC.strokeStyle = '#555'; TC.lineWidth = 2;
-        TC.strokeRect(tx(-0.04), tz(RZ+0.04), 0.08*TSCALE, 0.08*TSCALE);
-      }
-      return;
-    }
-    TC.fillStyle = JOINT_COLORS[i] || '#fff';
-    TC.beginPath(); TC.arc(tx(p.x), tz(p.z), i===4?5:8, 0, Math.PI*2); TC.fill();
-  });
-
-  // Target (top view)
-  if(d.px !== null && d.pz !== null) {
-    TC.fillStyle = 'rgba(255,50,50,0.85)';
-    TC.beginPath(); TC.arc(tx(d.px), tz(d.pz), 7, 0, Math.PI*2); TC.fill();
-    TC.strokeStyle = '#ff3333'; TC.lineWidth=1; TC.setLineDash([4,4]);
-    TC.beginPath();
-    TC.moveTo(tx(tpts[4].x), tz(tpts[4].z));
-    TC.lineTo(tx(d.px), tz(d.pz)); TC.stroke(); TC.setLineDash([]);
-  }
-
-  TC.fillStyle = '#444'; TC.font = '10px Consolas';
-  TC.fillText('ARM — TOP VIEW (X-Z)', 6, 14);
-  TC.fillStyle = '#555'; TC.font = '10px Consolas';
-  TC.fillText('yaw: '+(a0*180/Math.PI).toFixed(1)+'°  fwd reach: '+
-    ((ua_fwd+fa_fwd)*100).toFixed(0)+'cm', 6, H-8);
-}
   </script>
 </body>
 </html>"""
@@ -1192,7 +855,7 @@ class WebStreamer:
         self._frames = {'left': None, 'right': None}
         self._stats = {'x':None, 'y':None, 'z':None, 'px':None, 'py':None, 'pz':None, 'land_x':None, 'land_z':None,
                        'land_s1_x':None, 'land_s1_z':None, 'land_s2_x':None, 'land_s2_z':None, 'land_s3_x':None, 'land_s3_z':None,
-                       'det_l_x':None, 'det_l_y':None, 'det_r_x':None, 'det_r_y':None, 'trail':[], 'joints':{}, 'phase':0}
+                       'det_l_x':None, 'det_l_y':None, 'det_r_x':None, 'det_r_y':None, 'trail':[], 'joints':{}, 'links':{}, 'phase':0}
         self._topic_data = {}
         self.traj_logs = []
 
@@ -1419,6 +1082,13 @@ class WebStreamer:
             if hasattr(self, 'ros_worker'): self.ros_worker.test_pub.publish(msg)
             return Response(json.dumps({'ok': True}), mimetype='application/json')
 
+        @self._app.route('/api/arm_ready', methods=['POST'])
+        def api_arm_ready():
+            if hasattr(self, 'ros_worker'):
+                msg = String(); msg.data = 'ready'
+                self.ros_worker.arm_cmd_pub.publish(msg)
+            return Response(json.dumps({'ok': True}), mimetype='application/json')
+
         @self._app.route('/api/arm_home', methods=['POST'])
         def api_arm_home():
             if hasattr(self, 'ros_worker'):
@@ -1496,11 +1166,14 @@ class SystemLauncher(threading.Thread):
             "ros2 launch ttt_control rsp.launch.py &\n"
             "ros2 launch ttt_control move_group.launch.py &\n"
             "ros2 launch ttt_control controllers.launch.py &\n"
-            # world frame: X=lateral, Y=up, Z=toward-player (Y-up convention from ball tracking)
-            # URDF frame:  X=lateral, Y=horizontal, Z=up  (standard ROS Z-up)
-            # Rotation roll=-1.5708 (-90°) aligns URDF-Z (up) with world-Y (up),
-            # so IK targets in world frame map to the correct height in robot frame.
-            "ros2 run tf2_ros static_transform_publisher 0 0 -1.4732 0 0 -1.5708 world root &\n"
+            # world frame: X=lateral, Y=up, Z=depth (Y-up convention from ball tracking)
+            # root frame: X=forward, Y=left, Z=up 
+            # FIX — normalized quaternion for world(X=right,Y=up,Z=depth) → root(X=fwd,Y=left,Z=up):
+            "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z -1.4732 --qx -0.7071 --qy 0 --qz 0 --qw 0.7071 --frame-id world --child-frame-id root &\n"
+            # Lock down the MoveIt SRDF links to our perfect manual translation
+            "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id root --child-frame-id robot_base &\n"
+            "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id root --child-frame-id table_center &\n"
+            "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id world --child-frame-id table &\n"
             "ros2 run ttt_control control_node &\n"
             "ros2 run ttt_hardware hardware_node --ros-args -p stm_ip:=192.168.1.100 -p stm_port:=5000 -p joint_topic:=/joint_states &\n"
             
@@ -1550,7 +1223,36 @@ class ROSWorker(threading.Thread):
                        self._rec('/ball_detection/right', 'BallDetection', {'x': round(m.x, 1), 'y': round(m.y, 1), 'radius': round(getattr(m, 'radius', 0.0), 1), 'area': int((getattr(m, 'radius', 0.0)*2)**2), 'conf': round(getattr(m, 'confidence', 0.0), 3)})), q)
         self.test_pub = self.n.create_publisher(PointStamped, '/ball_trajectory/predicted', 10)
         self.arm_cmd_pub = self.n.create_publisher(String, '/arm_named_target', 10)
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self.n)
+        self.n.create_timer(0.05, self.timer_tf)  # 20Hz TF poll
+
         rclpy.spin(self.n)
+
+    def timer_tf(self):
+        links = {}
+        errors = []
+        for link in ['root', 'Base', 'Shoulder', 'UpperArm', 'Forearm', 'Wrist', 'Paddle', 'paddle_tcp']:
+            try:
+                t = self.tf_buffer.lookup_transform(
+                    'root', link,
+                    rclpy.time.Time()
+                )
+                links[link] = {
+                    'x': t.transform.translation.x,
+                    'y': t.transform.translation.y,
+                    'z': t.transform.translation.z
+                }
+            except Exception as e:
+                errors.append(f"{link}: {type(e).__name__}")
+
+        if links:
+            self.ws._stats['links'] = links
+            self.ws._stats['tf_status'] = f"OK ({len(links)}/8 links)"
+        else:
+            # Keep stale links visible while we wait for TF to arrive
+            self.ws._stats['tf_status'] = "WAITING | " + "; ".join(errors[:3])
 
     def cb_3d(self, m):
         now = time.time()
@@ -1730,7 +1432,7 @@ if __name__ == "__main__":
 
     streamer = WebStreamer()
     streamer.start()
-    # SystemLauncher().start()
+    SystemLauncher().start()
     worker = ROSWorker(streamer)
     streamer.ros_worker = worker
     worker.start()
