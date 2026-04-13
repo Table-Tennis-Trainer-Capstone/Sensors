@@ -21,7 +21,7 @@ public:
     ControlNode() : Node("ttt_control_node"), new_target_(false)
     {
         this->declare_parameter("update_rate_hz",  10.0);
-        this->declare_parameter("planning_time_s",  0.1);  // 100ms planning budget
+        this->declare_parameter("planning_time_s",  0.1);  // planning budget (ms)
         this->declare_parameter("return_delay_ms",  100);  // delay before returning home after swing
         this->declare_parameter("speed_multiplier", 1.0);  // Overdrive multiplier to bypass slow URDF limits
 
@@ -130,13 +130,24 @@ public:
                 base_constraint.weight = 1.0;
                 constraints.joint_constraints.push_back(base_constraint);
 
-                // Keep the paddle face untwisted (prevent rolling mid-swing)
+                // Prevent the elbow from unwinding all the way around (-240° URDF range).
+                // Without this, RRTConnect finds a valid but unnatural path through ~-227°.
+                // Clamping to -2.5–0.5 rad keeps the arm in a natural forward-reach posture.
+                moveit_msgs::msg::JointConstraint elbow_constraint;
+                elbow_constraint.joint_name = "ForeArmRotate_0";
+                elbow_constraint.position = -1.0;        // Natural mid-range hitting posture
+                elbow_constraint.tolerance_above = 1.5;  // Up to +0.5 rad (URDF limit)
+                elbow_constraint.tolerance_below = 1.5;  // Down to -2.5 rad — prevents going all the way around
+                elbow_constraint.weight = 1.0;
+                constraints.joint_constraints.push_back(elbow_constraint);
+
+                // Keep the paddle face toward the table (prevents paddle from spinning freely during IK solve)
                 moveit_msgs::msg::JointConstraint paddle_constraint;
                 paddle_constraint.joint_name = "PaddleRotate_0";
-                paddle_constraint.position = 0.0;        // Ready state angle (flat)
-                paddle_constraint.tolerance_above = 3.14; // Relaxed for maximum reachability
-                paddle_constraint.tolerance_below = 3.14;
-                paddle_constraint.weight = 0.1;
+                paddle_constraint.position = 0.0;        // Ready state angle (paddle faces table)
+                paddle_constraint.tolerance_above = 0.8; // ~46° of rotation allowed
+                paddle_constraint.tolerance_below = 0.8;
+                paddle_constraint.weight = 0.8;
                 constraints.joint_constraints.push_back(paddle_constraint);
 
                 // Keep the wrist near its "ready" angle so the paddle face stays vertical
@@ -216,22 +227,22 @@ private:
         in_base.header.stamp = msg->header.stamp;
         in_base.header.frame_id = "root";
 
-        // The vision system "world" frame is LEFT-HANDED: X=Right, Y=Up, Z=Forward.
-        // The robot "root" frame is RIGHT-HANDED: X=Right, Y=Forward, Z=Up.
+        // The vision system "table" frame is LEFT-HANDED: X=Right, Y=Up, Z=Depth (Forward).
+        // The robot "root" frame is RIGHT-HANDED: X=Back, Y=Right, Z=Up.
         // tf2 cannot safely transform left-handed to right-handed without inverting an axis
         // and causing the arm to swing the wrong way. We manually map the coordinates here.
         
-        in_base.point.x = msg->point.x;                  // Lateral matches
-        in_base.point.y = msg->point.z + 1.4732;         // World Depth (+Z) maps to Root Forward (+Y)
-        in_base.point.z = msg->point.y;                  // World Up (+Y) maps to Root Up (+Z)
+        in_base.point.x = -(msg->point.z + 1.4732);      // Table Depth (+Z) maps to Root Forward (-X)
+        in_base.point.y = msg->point.x;                  // Table Right (+X) maps to Root Right (+Y)
+        in_base.point.z = msg->point.y;                  // Table Up (+Y) maps to Root Up (+Z)
 
-        // 3. Safety Reject
+        // Safety Reject
         if (std::abs(in_base.point.x) > 5.0 || std::abs(in_base.point.y) > 5.0 || std::abs(in_base.point.z) > 5.0) {
             return;
         }
 
         RCLCPP_INFO(this->get_logger(),
-            "\n== TARGET MAPPED ==\n WORLD: X=%+.3f (right), Y=%+.3f (height), Z=%+.3f (depth)\n ROOT:  X=%+.3f (right), Y=%+.3f (forward), Z=%+.3f (height)",
+            "\n== TARGET MAPPED ==\n TABLE: X=%+.3f (right), Y=%+.3f (height), Z=%+.3f (depth)\n ROOT:  X=%+.3f (back), Y=%+.3f (right), Z=%+.3f (height)",
             msg->point.x, msg->point.y, msg->point.z,
             in_base.point.x, in_base.point.y, in_base.point.z);
 

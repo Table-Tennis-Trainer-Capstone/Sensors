@@ -13,7 +13,7 @@ PARAMS = {
     'fps':                 240,
 
     # ── Ball Detection (vision_node) ──────────────────────────────────────────
-    'min_area':               20,   # Ignore tiny 4x5 pixel noise fragments
+    'min_area':             20,   # Ignore tiny 4x5 pixel noise fragments
     'max_area':             295,  # Tightened: ball is rarely >200px area. Rejects paddles/hands.
     'motion_threshold':     12,   # Bumped slightly to reject micro-vibrations on the white lines
     'min_contrast':         55,   # Slightly raised to ignore faint reflection noise
@@ -21,7 +21,7 @@ PARAMS = {
     'edge_margin':          10,   # Reduced: Reclaims the outer edges of the camera lens
     'kf_gate_px':          120.0, # Widened slightly: Allows the tracker to follow faster sudden movements
     'kf_process_noise':     0.08, # Increased: Reduces smoothing inertia so the tracker feels "snappy" again
-    'table_roi_left':     [153, 157, 388, 81, 569, 194, 253, 395],
+    'table_roi_left':     [156, 145, 388, 81, 563, 195, 241, 385],
     'table_roi_right':    [294, 54, 524, 139, 411, 372, 120, 156],
 
     # ── Stereo Camera Intrinsic Lenses ────────────────────────────────────────
@@ -36,11 +36,11 @@ PARAMS = {
     'net_dist_z':         0.61,   # Z-distance from cameras to the physical net
     'height_left':        0.7,   # Physical height of Left Cam
     'height_right':       0.53,   # Physical height of Right Cam
-    'pan_left_deg':       19.3,
+    'pan_left_deg':       20.9,
     'pan_right_deg':      23.5,
-    'tilt_left_deg':      30.2,
+    'tilt_left_deg':      31.5,
     'tilt_right_deg':     29.8,
-    'roll_left_deg':     -12.1,
+    'roll_left_deg':     -11.6,
     'roll_right_deg':      14.1,
     'limit_x_m':           1.5,   # 3D bounding box (width max +/-)
     'limit_y_top_m':       2.3,   # 3D bounding box (height max)

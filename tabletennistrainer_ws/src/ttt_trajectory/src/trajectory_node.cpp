@@ -167,9 +167,11 @@ private:
         if (!buffer_.empty() && (t_abs - buffer_.back().t_abs > 0.2))
             resetBuffer("tracking gap >200ms");
 
-        // Ball touched table surface ⇒ bounce, new arc
+        // Ball touched table surface ⇒ bounce, new arc.
+        // Only reset (and log) if we have an active track — stereo noise at Y≈0
+        // when nothing is tracked would otherwise spam this message continuously.
         if (by < table_y_ + 0.02) {
-            resetBuffer("bounce detected");
+            if (!buffer_.empty()) resetBuffer("bounce detected");
             return;
         }
 
@@ -228,6 +230,13 @@ private:
 
         double z_drop = buffer_.front().z - buffer_.back().z;
         double dt_span = buffer_.back().t - buffer_.front().t;
+        
+        // If the overall track has drifted significantly backwards (away from robot), it's stereo noise.
+        if (z_drop < -0.15) {
+            resetBuffer("noise: track moving backwards");
+            return;
+        }
+        
         if (z_drop < 0.015) return;
         if (dt_span > 0.0 && (z_drop/dt_span) < min_speed_) return;
         if (!originated_across_net_) return;
