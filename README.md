@@ -45,10 +45,10 @@ The project utilizes a distributed hardware stack to minimize processing latency
 ### Hardware Mapping
 | Component | Connection | Purpose |
 | :--- | :--- | :--- |
-| **Arducam OV9281** | MIPI CSI-2 (CAM1 port) | 240 FPS global shutter capture at 640×400 |
-| **Jetson A ↔ B** | Ethernet (Gigabit, Static IPs) | ROS2 DDS for sharing 2D ball detections |
-| **Jetson A ↔ STM32** | Ethernet (UDP, 192.168.1.100) | Sending joint angles at high frequency |
-| **STM32 ↔ Motors** | PWM / Step-Dir | Direct motor control |
+| **Arducam OV9281** | MIPI CSI-2 (CAM1 port) | 240 FPS global shutter capture at 640x400 |
+| **Jetson A <-> B** | Ethernet (Gigabit, Static IPs) | ROS2 DDS for sharing 2D ball detections |
+| **Jetson A <-> STM32** | Ethernet (UDP, 192.168.1.100) | Sending joint angles at high frequency |
+| **STM32 <-> Motors** | PWM / Step-Dir | Direct motor control |
 
 ### Network Configuration
 - **Jetson A IP:** `192.168.1.10`
@@ -114,31 +114,26 @@ Each package in the `src/` directory is designed with **modularity** in mind.
 ### 6. ttt_control
 * **Type:** Motion Planning
 * **Function:** Inverse kinematics (IK) solver
-* **Status:** *To be implemented*
+* **Features:** Utilizes MoveIt2 and OMPL (RRTConnect) to calculate and execute joint trajectories. Implements custom joint constraints to maintain optimal paddle orientation and avoid singularities or self-collisions.
 
 ### 7. ttt_hardware
 * **Type:** Hardware Bridge
 * **Function:** UDP communication to STM32
-* **Protocol:** Binary packed joint angles
+* **Protocol:** UDP stream parsing joint states
 * **Target:** `192.168.1.100:5000`
-* **Status:** *To be implemented*
+* **Status:** Implemented. Bridges ROS2 `/joint_states` to the STM32 via high-frequency UDP messages.
 
 ### 8. ttt_calibration
 * **Type:** Spatial Configuration
 * **Function:** Camera pose estimation and TF2 transforms
-* **Methods:**
-  - Manual measurement (tape measure + level app)
-  - **ArUco marker-based automatic calibration** (recommended)
-* **Output:** TF2 transforms (table → camera_left/right → robot_base)
+* **Output:** TF2 transforms (table -> root -> robot_base)
 
 ### 9. ttt_bringup
 * **Type:** System Orchestrator
 * **Function:** Launch scripts for coordinated startup
 * **Launch Files:**
-  - `jetsonA.launch.py` - Left camera + vision + stereo + trajectory
-  - `jetsonB.launch.py` - Right camera + vision
-  - `calibrate_table_launch.py` - ArUco calibration mode
-  - `camera_left/right.launch.py` - Individual camera testing
+  - `calibration.py` - Central configuration dictionary for all nodes
+  - `marty_gui.py` - Flask application acting as the master control interface
 
 ---
 
@@ -690,5 +685,3 @@ ros2 topic hz /camera/left/image_raw  # Should be ~240 Hz
 ---
 
 ## Acknowledgments
-
-

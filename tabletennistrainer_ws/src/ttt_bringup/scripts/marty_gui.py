@@ -1232,9 +1232,9 @@ class WebStreamer:
 
 class SystemLauncher(threading.Thread):
     def run(self):
-        print("🔄 Syncing and building workspace on Jetson A... (this may take a moment)")
+        print(" Syncing and building workspace on Jetson A... (this may take a moment)")
         subprocess.run("bash /home/capstone-nano2/Sensors/tabletennistrainer_ws/sync_and_build.sh", shell=True)
-        print("✅ Workspace synced! Launching ROS 2 nodes...")
+        print(" Workspace synced! Launching ROS 2 nodes...")
 
         # --- RIGHT CAMERA LAUNCH COMMAND (Jetson B - Local) ---
         _roi_b = (' -p table_roi:="[' + ','.join(str(v) for v in CAL['table_roi_right']) + ']"') if CAL.get('table_roi_right') else ''
@@ -1559,7 +1559,7 @@ if __name__ == "__main__":
     streamer.ros_worker = worker
     worker.start()
 
-    print("=======================================\n✅ FULL VISION & TELEMETRY ONLINE\nVIEW AT: http://192.168.55.1:5000\n=======================================")
+    print("=======================================\n FULL VISION & TELEMETRY ONLINE\nVIEW AT: http://192.168.55.1:5000\n=======================================")
     try:
         while True: time.sleep(1)
     except KeyboardInterrupt:
