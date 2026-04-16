@@ -273,6 +273,7 @@ _HTML_PAGE = """<!DOCTYPE html>
     <button class="btn btn-test" onclick="sendArmPoint()" style="margin-left:6px;">MOVE</button>
     <button class="btn" style="background:#1a3a1a;border:1px solid #0a0;color:#0f0;margin-left:12px;" onclick="fetch('/api/arm_ready',{method:'POST'})">READY</button>
     <button class="btn" style="background:#1a3a1a;border:1px solid #0a0;color:#0f0;margin-left:4px;" onclick="fetch('/api/arm_home',{method:'POST'})">HOME</button>
+    <button class="btn" id="stm-home-btn" style="background:#1a1a3a;border:1px solid #55f;color:#88f;margin-left:12px;" onclick="sendStmHome()">STM HOME</button>
   </div>
 
   <div class="topics-panel">
@@ -794,6 +795,15 @@ function sendArmPoint(){
   fetch('/api/test_arm', {method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({x: x, y: y, z: z})});
 }
+
+function sendStmHome(){
+  var btn = document.getElementById('stm-home-btn');
+  btn.textContent = 'HOMING...'; btn.style.color = '#ff0';
+  fetch('/api/stm_home', {method:'POST'}).then(r=>r.json()).then(res=>{
+    if(res.ok){ btn.textContent = 'STM HOME'; btn.style.color = '#0f0'; setTimeout(()=>{ btn.textContent='STM HOME'; btn.style.color='#88f'; }, 1500); }
+    else { btn.textContent = 'ERROR'; btn.style.color = '#f55'; setTimeout(()=>{ btn.textContent='STM HOME'; btn.style.color='#88f'; }, 2000); }
+  }).catch(()=>{ btn.textContent = 'ERROR'; btn.style.color = '#f55'; setTimeout(()=>{ btn.textContent='STM HOME'; btn.style.color='#88f'; }, 2000); });
+}
   </script>
 </body>
 </html>"""
@@ -1207,6 +1217,13 @@ class WebStreamer:
                 self.ros_worker.arm_cmd_pub.publish(msg)
             return Response(json.dumps({'ok': True}), mimetype='application/json')
 
+        @self._app.route('/api/stm_home', methods=['POST'])
+        def api_stm_home():
+            if hasattr(self, 'ros_worker'):
+                msg = String(); msg.data = 'home'
+                self.ros_worker.stm_cmd_pub.publish(msg)
+            return Response(json.dumps({'ok': True}), mimetype='application/json')
+
     def push_frame(self, f, s):
         _, j = cv2.imencode('.jpg', f, [cv2.IMWRITE_JPEG_QUALITY, 70])
         self._frames[s] = j.tobytes()
@@ -1279,7 +1296,7 @@ class SystemLauncher(threading.Thread):
             "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id root --child-frame-id table_center &\n"
             "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id world --child-frame-id table &\n"
             "ros2 run ttt_control control_node &\n"
-            "ros2 run ttt_hardware hardware_node --ros-args -p stm_ip:=192.168.1.100 -p stm_port:=5000 -p joint_topic:=/joint_states &\n"
+            "ros2 run ttt_hardware hardware_node --ros-args -p stm_ip:=192.168.1.100 -p stm_port:=7777 -p joint_topic:=/joint_states &\n"
             
             "wait\n"
         )
@@ -1327,6 +1344,7 @@ class ROSWorker(threading.Thread):
                        self._rec('/ball_detection/right', 'BallDetection', {'x': round(m.x, 1), 'y': round(m.y, 1), 'radius': round(getattr(m, 'radius', 0.0), 1), 'area': int((getattr(m, 'radius', 0.0)*2)**2), 'conf': round(getattr(m, 'confidence', 0.0), 3)})), q)
         self.test_pub = self.n.create_publisher(PointStamped, '/ball_trajectory/predicted', 10)
         self.arm_cmd_pub = self.n.create_publisher(String, '/arm_named_target', 10)
+        self.stm_cmd_pub = self.n.create_publisher(String, '/stm_cmd', 10)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self.n)

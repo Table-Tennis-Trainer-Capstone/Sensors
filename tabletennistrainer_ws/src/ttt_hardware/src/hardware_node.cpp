@@ -1,150 +1,193 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <std_msgs/msg/string.hpp>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
-#include <cstdint>
+#include <cmath>
 #include <sstream>
 #include <iomanip>
+#include <thread>
+#include <atomic>
+#include <array>
+#include <string>
+#include <unordered_map>
 
-// ---------------------------------------------------------------------------
-// Packet layout (little-endian, packed)
-//
-//  Byte(s)  Field
-//  0-1      Magic:       0xAA 0x55
-//  2        Version:     0x01
-//  3        Sequence:    rolling 0-255
-//  4-7      Timestamp:   milliseconds since node start (uint32)
-//  8        Num joints:  number of valid joint entries (uint8, max 8)
-//  9-40     Positions:   8 x float32 (radians)
-//  41-72    Velocities:  8 x float32 (rad/s)
-//  73-74    CRC16:       CCITT over bytes 0-72
-//  75       End:         0xFF
-//
-//  Total: 76 bytes
-// ---------------------------------------------------------------------------
-
-#pragma pack(push, 1)
-struct HardwarePacket {
-    uint8_t  magic[2]       = {0xAA, 0x55};
-    uint8_t  version        = 0x01;
-    uint8_t  seq            = 0;
-    uint32_t timestamp_ms   = 0;
-    uint8_t  num_joints     = 0;
-    float    positions[8]   = {};
-    float    velocities[8]  = {};
-    uint16_t crc            = 0;
-    uint8_t  end            = 0xFF;
+// Joint name → M-command motor slot (m1..m5) mapping.
+// Order must match the STM motor numbering:
+//   m1 = Base   (Motor 1, AS5600 I2C1)
+//   m2 = Shoulder (Motor 2, AS5600 I2C2)
+//   m3 = Elbow  (Motor 3, AS5600 I2C3)
+//   m4 = Wrist  (Motor 4, MG995 servo TIM3 CH1)
+//   m5 = Wrist roll / Paddle (Motor 5, MG995 servo TIM3 CH2)
+static const std::array<std::string, 5> JOINT_ORDER = {
+    "BaseRotate_0",
+    "UpperArmRotate_0",
+    "ForeArmRotate_0",
+    "WristRotate_0",
+    "PaddleRotate_0",
 };
-#pragma pack(pop)
-
-static uint16_t crc16_ccitt(const uint8_t* data, size_t len)
-{
-    uint16_t crc = 0xFFFF;
-    for (size_t i = 0; i < len; i++) {
-        crc ^= static_cast<uint16_t>(data[i]) << 8;
-        for (int b = 0; b < 8; b++)
-            crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : (crc << 1);
-    }
-    return crc;
-}
 
 class HardwareNode : public rclcpp::Node
 {
 public:
-    HardwareNode() : Node("hardware_node"), seq_(0)
+    HardwareNode() : Node("hardware_node")
     {
-        this->declare_parameter("stm_ip",   "192.168.1.50");
-        this->declare_parameter("stm_port", 5000);
+        this->declare_parameter("stm_ip",      "192.168.1.100");
+        this->declare_parameter("stm_port",    7777);
         this->declare_parameter("joint_topic", "/joint_states");
 
         stm_ip_   = this->get_parameter("stm_ip").as_string();
         stm_port_ = this->get_parameter("stm_port").as_int();
         std::string topic = this->get_parameter("joint_topic").as_string();
 
-        start_time_ = this->now();
-
-        // Open UDP socket
+        // UDP socket — also used for receiving STM replies (OS assigns source port
+        // on first sendto, and the STM replies to that same source IP:port).
         sock_ = socket(AF_INET, SOCK_DGRAM, 0);
         if (sock_ < 0) {
-            RCLCPP_FATAL(this->get_logger(), "Failed to create UDP socket");
+            RCLCPP_FATAL(this->get_logger(), "Failed to create UDP socket: %s", strerror(errno));
             throw std::runtime_error("UDP socket creation failed");
         }
 
+        // 1-second receive timeout so the reply thread can exit cleanly.
+        struct timeval tv{1, 0};
+        setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
         memset(&stm_addr_, 0, sizeof(stm_addr_));
         stm_addr_.sin_family      = AF_INET;
-        stm_addr_.sin_port        = htons(stm_port_);
+        stm_addr_.sin_port        = htons(static_cast<uint16_t>(stm_port_));
         stm_addr_.sin_addr.s_addr = inet_addr(stm_ip_.c_str());
 
-        sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
+        joint_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
             topic, 10,
             std::bind(&HardwareNode::jointCallback, this, std::placeholders::_1));
 
+        // /stm_cmd accepts "home", "estop", or "H <n>" to control the STM directly.
+        cmd_sub_ = this->create_subscription<std_msgs::msg::String>(
+            "/stm_cmd", 10,
+            std::bind(&HardwareNode::cmdCallback, this, std::placeholders::_1));
+
+        reply_running_ = true;
+        reply_thread_  = std::thread(&HardwareNode::replyListener, this);
+
         RCLCPP_INFO(this->get_logger(), "Hardware node ready — sending to %s:%d",
                     stm_ip_.c_str(), stm_port_);
-        RCLCPP_INFO(this->get_logger(), "Subscribed to: %s", topic.c_str());
-        RCLCPP_INFO(this->get_logger(), "Packet size: %zu bytes", sizeof(HardwarePacket));
+        RCLCPP_INFO(this->get_logger(), "Subscribed to joint topic: %s", topic.c_str());
+        RCLCPP_INFO(this->get_logger(), "Subscribed to /stm_cmd for home/estop commands");
     }
 
     ~HardwareNode()
     {
+        reply_running_ = false;
+        if (sock_ >= 0) {
+            // Unblock recvfrom by shutting down the socket.
+            shutdown(sock_, SHUT_RDWR);
+        }
+        if (reply_thread_.joinable()) reply_thread_.join();
         if (sock_ >= 0) close(sock_);
     }
 
 private:
-    void jointCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
+    void sendUdp(const std::string & cmd)
     {
-        HardwarePacket pkt;
-
-        // Timestamp (ms since node start)
-        auto elapsed = this->now() - start_time_;
-        pkt.timestamp_ms = static_cast<uint32_t>(elapsed.nanoseconds() / 1'000'000);
-
-        pkt.seq = seq_++;
-
-        uint8_t n = static_cast<uint8_t>(std::min(msg->name.size(), size_t(8)));
-        pkt.num_joints = n;
-
-        for (uint8_t i = 0; i < n; i++) {
-            if (i < msg->position.size())
-                pkt.positions[i]  = static_cast<float>(msg->position[i]);
-            if (i < msg->velocity.size())
-                pkt.velocities[i] = static_cast<float>(msg->velocity[i]);
-        }
-
-        // CRC over everything except the crc and end fields
-        size_t crc_len = offsetof(HardwarePacket, crc);
-        pkt.crc = crc16_ccitt(reinterpret_cast<const uint8_t*>(&pkt), crc_len);
-
-        ssize_t sent = sendto(sock_, &pkt, sizeof(pkt), 0,
-                              reinterpret_cast<sockaddr*>(&stm_addr_),
+        ssize_t sent = sendto(sock_, cmd.c_str(), cmd.size(), 0,
+                              reinterpret_cast<sockaddr *>(&stm_addr_),
                               sizeof(stm_addr_));
-
         if (sent < 0) {
-            RCLCPP_WARN(this->get_logger(), "UDP send failed");
-        } else {
-            std::ostringstream ss;
-            for (uint8_t i = 0; i < n; i++) {
-                ss << std::fixed << std::setprecision(3) << pkt.positions[i] << " ";
-            }
-            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
-                "Sent UDP [seq=%3d] joints: [ %s]", pkt.seq, ss.str().c_str());
+            RCLCPP_WARN(this->get_logger(), "UDP send failed: %s", strerror(errno));
         }
     }
 
-    int sock_;
-    sockaddr_in stm_addr_;
-    std::string stm_ip_;
-    int stm_port_;
-    uint8_t seq_;
-    rclcpp::Time start_time_;
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_;
+    void jointCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
+    {
+        // Build name → position map (values are in radians from ROS/MoveIt).
+        std::unordered_map<std::string, double> pos_map;
+        for (size_t i = 0; i < msg->name.size(); i++) {
+            if (i < msg->position.size()) {
+                pos_map[msg->name[i]] = msg->position[i];
+            }
+        }
+
+        // Build: M <m1_deg> <m2_deg> <m3_deg> <m4_deg> <m5_deg>
+        // Use "_" for any joint not present so the STM skips it.
+        std::ostringstream ss;
+        ss << "M";
+        for (const auto & jname : JOINT_ORDER) {
+            auto it = pos_map.find(jname);
+            if (it != pos_map.end()) {
+                double deg = it->second * (180.0 / M_PI);
+                ss << " " << std::fixed << std::setprecision(2) << deg;
+            } else {
+                ss << " _";
+            }
+        }
+        ss << "\n";
+
+        std::string cmd = ss.str();
+        sendUdp(cmd);
+
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
+            "Sent: %s", cmd.c_str());
+    }
+
+    void cmdCallback(const std_msgs::msg::String::SharedPtr msg)
+    {
+        const std::string & data = msg->data;
+
+        if (data == "home") {
+            sendUdp("H\n");
+            RCLCPP_INFO(this->get_logger(), "Sent: H (home all motors)");
+        } else if (data == "estop") {
+            sendUdp("E\n");
+            RCLCPP_INFO(this->get_logger(), "Sent: E (emergency stop)");
+        } else if (data.size() >= 3 && data[0] == 'H' && data[1] == ' ') {
+            // "H <n>" — home a specific motor
+            sendUdp(data + "\n");
+            RCLCPP_INFO(this->get_logger(), "Sent: %s", data.c_str());
+        } else {
+            RCLCPP_WARN(this->get_logger(), "Unknown /stm_cmd: '%s'", data.c_str());
+        }
+    }
+
+    // Logs replies from the STM.  The STM sends plain ASCII back to whichever
+    // IP:port last sent it a packet, so we can recvfrom on the same socket.
+    void replyListener()
+    {
+        char buf[256];
+        sockaddr_in from{};
+        socklen_t from_len = sizeof(from);
+
+        while (reply_running_) {
+            ssize_t n = recvfrom(sock_, buf, sizeof(buf) - 1, 0,
+                                 reinterpret_cast<sockaddr *>(&from), &from_len);
+            if (n > 0) {
+                buf[n] = '\0';
+                // Strip trailing CR/LF
+                while (n > 0 && (buf[n - 1] == '\r' || buf[n - 1] == '\n')) {
+                    buf[--n] = '\0';
+                }
+                RCLCPP_INFO(this->get_logger(), "STM reply: %s", buf);
+            }
+            // On timeout (EAGAIN/EWOULDBLOCK) or shutdown, loop back and check flag.
+        }
+    }
+
+    int          sock_{-1};
+    sockaddr_in  stm_addr_{};
+    std::string  stm_ip_;
+    int          stm_port_;
+
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr         cmd_sub_;
+
+    std::thread        reply_thread_;
+    std::atomic<bool>  reply_running_{false};
 };
 
-int main(int argc, char** argv)
+int main(int argc, char ** argv)
 {
     rclcpp::init(argc, argv);
     rclcpp::spin(std::make_shared<HardwareNode>());
