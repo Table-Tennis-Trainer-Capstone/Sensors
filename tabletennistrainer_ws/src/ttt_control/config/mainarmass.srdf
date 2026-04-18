@@ -16,48 +16,21 @@
         <link name="paddle_tcp"/>
     </group>
     <group_state name="home" group="armgroup">
-        <joint name="BaseRotate_0" value="-0.7853"/>
-        <joint name="ForeArmRotate_0" value="0.4319"/>
-        <joint name="PaddleRotate_0" value="0"/>
-        <joint name="UpperArmRotate_0" value="-0.2616"/>
-        <joint name="WristRotate_0" value="-0.1028"/>
-    </group_state>
-    
-    <group_state name="ready" group="armgroup">
-        <joint name="BaseRotate_0" value="-0.7853"/>
-        <joint name="ForeArmRotate_0" value="-0.0"/>
-        <joint name="PaddleRotate_0" value="0"/>
-        <joint name="UpperArmRotate_0" value="0.4319"/>
-        <joint name="WristRotate_0" value="-0.2616"/>
+        <joint name="BaseRotate_0" value="0.0"/>
+        <joint name="UpperArmRotate_0" value="-0.261799"/> <joint name="ForeArmRotate_0" value="-0.436332"/> <joint name="WristRotate_0" value="0.0"/>
+        <joint name="PaddleRotate_0" value="0.0"/>
     </group_state>
 
-    <group_state name="swing_center" group="armgroup">
+    <group_state name="ready" group="armgroup">
         <joint name="BaseRotate_0" value="0.0"/>
-        <joint name="ForeArmRotate_0" value="-0.0686"/>
-        <joint name="PaddleRotate_0" value="0"/>
-        <joint name="UpperArmRotate_0" value="-0.2615"/>
-        <joint name="WristRotate_0" value="-1.0803"/>
+        <joint name="UpperArmRotate_0" value="0.4319"/> <joint name="ForeArmRotate_0" value="0.15"/> <joint name="WristRotate_0" value="0.0"/>
+        <joint name="PaddleRotate_0" value="0.0"/>
     </group_state>
-    
-    <group_state name="swing_left" group="armgroup">
-        <joint name="BaseRotate_0" value="-0.785"/>
-        <joint name="ForeArmRotate_0" value="-0.0686"/>
-        <joint name="PaddleRotate_0" value="0"/>
-        <joint name="UpperArmRotate_0" value="-0.2615"/>
-        <joint name="WristRotate_0" value="-1.0803"/>
-    </group_state>
-    
-    <group_state name="swing_right" group="armgroup">
-        <joint name="BaseRotate_0" value="0.785"/>
-        <joint name="ForeArmRotate_0" value="-0.0686"/>
-        <joint name="PaddleRotate_0" value="0"/>
-        <joint name="UpperArmRotate_0" value="-0.2615"/>
-        <joint name="WristRotate_0" value="-1.0803"/>
-    </group_state>
+
     <!--END EFFECTOR: Purpose: Represent information about an end effector.-->
     <end_effector name="PaddleEnd" parent_link="paddle_tcp" group="PaddleGroup" parent_group="armgroup"/>
     <!--VIRTUAL JOINT: Purpose: this element defines a virtual joint between a robot link and an external frame of reference (considered fixed with respect to the robot)-->
-    <virtual_joint name="virtual_arm" type="fixed" parent_frame="world" child_link="root"/>
+    <virtual_joint name="virtual_arm" type="fixed" parent_frame="world" child_link="table_center"/>
     <!--DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
     <disable_collisions link1="Base" link2="Shoulder" reason="Adjacent"/>
     <disable_collisions link1="Base" link2="UpperArm" reason="Never"/>
@@ -71,4 +44,13 @@
     <disable_collisions link1="Shoulder" link2="table_surface" reason="Default"/>
     <disable_collisions link1="UpperArm" link2="Wrist" reason="Never"/>
     <disable_collisions link1="UpperArm" link2="table_surface" reason="Never"/>
+    <disable_collisions link1="Forearm" link2="table_surface" reason="Default"/>
+    <disable_collisions link1="Wrist" link2="table_surface" reason="Default"/>
+    <disable_collisions link1="Paddle" link2="table_surface" reason="Default"/>
+    <disable_collisions link1="Base" link2="Forearm" reason="Never"/>
+    <disable_collisions link1="Base" link2="Wrist" reason="Never"/>
+    <disable_collisions link1="Base" link2="Paddle" reason="Never"/>
+    <disable_collisions link1="Shoulder" link2="Forearm" reason="Never"/>
+    <disable_collisions link1="Shoulder" link2="Wrist" reason="Never"/>
+    <disable_collisions link1="Shoulder" link2="Paddle" reason="Never"/>
 </robot>

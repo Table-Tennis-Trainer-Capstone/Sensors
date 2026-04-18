@@ -100,8 +100,6 @@ private:
     }
 
     void reportFPS() {
-        RCLCPP_INFO(this->get_logger(), "[%s] Actual Stream Speed: %zu FPS",
-            camera_id_.c_str(), frame_count_);
         frame_count_ = 0;
     }
 

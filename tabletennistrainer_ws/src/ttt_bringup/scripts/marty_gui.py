@@ -305,97 +305,75 @@ _HTML_PAGE = """<!DOCTYPE html>
       ctx.clearRect(0,0,w,h);
       var links=d.links||{};
       var linkOrder=['root','Base','Shoulder','UpperArm','Forearm','Wrist','Paddle','paddle_tcp'];
-      var segColors=['#777777','#00ff88','#00aaff','#ffaa00','#ff5555','#ff55ff','#aaaaff'];
+      var segColors=['#777','#00ff88','#00aaff','#ffaa00','#ff5555','#ff55ff','#aaaaff'];
       
-      var available = linkOrder.some(function(k){ return links[k]; });
-      if(!available){
-        ctx.fillStyle='#666'; ctx.font='12px Consolas'; ctx.textAlign='center';
-        ctx.fillText('Waiting for TF...', w/2, h/2-8);
-        ctx.fillText('(robot_state_publisher + joint_states)', w/2, h/2+10);
+      if(!linkOrder.some(function(k){ return links[k]; })){
+        ctx.fillStyle='#444'; ctx.font='12px Consolas'; ctx.textAlign='center';
+        ctx.fillText('Waiting for TF...', w/2, h/2-10);
         ctx.textAlign='left'; return;
       }
       
-      var h2 = h/2;
-      var SC = 120; 
-      var cx = w/2;
-      
-      // Layout
-      var floorY = h - 25;
-      var topBaseY = h2 - 15;
+      var SC=130, cx=w/2;
+      var divY = Math.round(h*0.44);       // dividing line between top and side views
+      var topCY = Math.round(divY*0.5);    // top view: root is centered in top panel
+      var sideCY = Math.round(divY + (h-divY)*0.5); // side view: root (Z=0) centered in side panel
 
-      // SIDE view
       ctx.strokeStyle='#334'; ctx.lineWidth=1;
-      ctx.beginPath(); ctx.moveTo(0,floorY); ctx.lineTo(w,floorY); ctx.stroke();
-      ctx.fillStyle='#335'; ctx.font='10px Consolas'; ctx.fillText('SIDE VIEW',4,floorY-3);
-      
-      // TOP view
-      ctx.beginPath(); ctx.moveTo(0,topBaseY); ctx.lineTo(w,topBaseY); ctx.stroke();
-      ctx.fillStyle='#335'; ctx.font='10px Consolas'; ctx.fillText('TOP VIEW',4,topBaseY-3);
+      ctx.beginPath(); ctx.moveTo(0,divY); ctx.lineTo(w,divY); ctx.stroke();
+      ctx.fillStyle='#334'; ctx.font='10px Consolas';
+      ctx.fillText('TOP VIEW (X-Y)',4,divY-3);
+      ctx.fillText('SIDE VIEW (X-Z)',4,h-6);
 
-      // Root mappings based on X=Back, Y=Right, Z=Up
-      function tx(p){ return cx + p.y*SC; }
-      function ty(p){ return topBaseY + p.x*SC; }
-      function sx(p){ return cx - p.x*SC; }
-      function sy(p){ return floorY - p.z*SC; }
+      // Crosshairs at root origin for each view
+      ctx.strokeStyle='#1a2a1a'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(cx-40,topCY); ctx.lineTo(cx+40,topCY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx,topCY-40); ctx.lineTo(cx,topCY+40); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx-40,sideCY); ctx.lineTo(cx+40,sideCY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx,sideCY-40); ctx.lineTo(cx,sideCY+40); ctx.stroke();
 
-      // Draw Base as a circular turret/pedestal to avoid 2D projection skew (the angled blue line)
+      function tx(p){ return cx - p.y*SC; }
+      function ty(p){ return topCY - p.x*SC; }
+      function sx(p){ return cx + p.x*SC; }
+      function sy(p){ return sideCY - p.z*SC; }
+
       var basePt = links['Base'];
-      var uArmPt = links['UpperArm'];
-      if(basePt && uArmPt){
-        ctx.fillStyle = 'rgba(0, 170, 255, 0.2)'; ctx.strokeStyle = '#00aaff'; ctx.lineWidth = 2;
-        // Top view turret circle
-        ctx.beginPath(); ctx.arc(tx(basePt), ty(basePt), 18, 0, Math.PI*2); ctx.fill(); ctx.stroke();
-        ctx.beginPath(); ctx.arc(tx(basePt), ty(basePt), 4, 0, Math.PI*2); ctx.fill();
-        // Side view pedestal (from UpperArm height down to floor)
-        var pedH = Math.max(floorY - sy(uArmPt), 5);
-        ctx.fillRect(sx(basePt)-14, sy(uArmPt), 28, pedH);
-        ctx.strokeRect(sx(basePt)-14, sy(uArmPt), 28, pedH);
+      if(basePt){
+        ctx.fillStyle='rgba(0,170,255,0.15)'; ctx.strokeStyle='#00aaff'; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.arc(tx(basePt),ty(basePt),14,0,Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(sx(basePt),sy(basePt),14,0,Math.PI*2); ctx.fill(); ctx.stroke();
       }
 
-      for(var i=3;i<linkOrder.length-1;i++){
-        var p1=links[linkOrder[i]], p2=links[linkOrder[i+1]];
-        if(!p1||!p2) continue;
-        // Top view
-        ctx.strokeStyle=segColors[i%segColors.length]; ctx.lineWidth=3;
+      for(var i=2;i<linkOrder.length-1;i++){
+        var p1=links[linkOrder[i]], p2=links[linkOrder[i+1]]; if(!p1||!p2) continue;
+        var col=segColors[i%segColors.length];
+        ctx.strokeStyle=col; ctx.lineWidth=4;
         ctx.beginPath(); ctx.moveTo(tx(p1),ty(p1)); ctx.lineTo(tx(p2),ty(p2)); ctx.stroke();
-        ctx.fillStyle=segColors[i%segColors.length];
-        ctx.beginPath(); ctx.arc(tx(p1),ty(p1),3,0,Math.PI*2); ctx.fill();
-        // Side view
+        ctx.fillStyle=col; ctx.beginPath(); ctx.arc(tx(p1),ty(p1),4,0,Math.PI*2); ctx.fill();
         ctx.beginPath(); ctx.moveTo(sx(p1),sy(p1)); ctx.lineTo(sx(p2),sy(p2)); ctx.stroke();
-        ctx.fillStyle=segColors[i%segColors.length];
-        ctx.beginPath(); ctx.arc(sx(p1),sy(p1),3,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle=col; ctx.beginPath(); ctx.arc(sx(p1),sy(p1),4,0,Math.PI*2); ctx.fill();
       }
 
       var tcp=links['paddle_tcp'];
       if(tcp){
-        ctx.fillStyle='#ff2222'; ctx.strokeStyle='#fff'; ctx.lineWidth=1.5;
-        
+        ctx.fillStyle='#f22'; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
         ctx.beginPath(); ctx.arc(tx(tcp),ty(tcp),5,0,Math.PI*2); ctx.fill(); ctx.stroke();
-        ctx.fillStyle='#fff'; ctx.font='bold 9px Consolas'; ctx.fillText('TCP', tx(tcp)+7, ty(tcp)+3);
-        
-        ctx.fillStyle='#ff2222';
+        ctx.fillStyle='#fff'; ctx.font='bold 9px Consolas'; ctx.fillText('TCP',tx(tcp)+9,ty(tcp)+4);
+        ctx.fillStyle='#f22';
         ctx.beginPath(); ctx.arc(sx(tcp),sy(tcp),5,0,Math.PI*2); ctx.fill(); ctx.stroke();
-        ctx.fillStyle='#fff'; ctx.fillText('TCP', sx(tcp)+7, sy(tcp)+3);
-        
-        ctx.fillStyle='#00ffcc'; ctx.font='11px Consolas';
-        ctx.fillText('X(back):'+tcp.x.toFixed(3)+' Y(rgt):'+tcp.y.toFixed(3)+' Z(up):'+tcp.z.toFixed(3)+'m', 6, h-6);
+        ctx.fillStyle='#fff'; ctx.fillText('TCP',sx(tcp)+9,sy(tcp)+4);
+        ctx.fillStyle='#0fc'; ctx.font='10px Consolas';
+        ctx.fillText('X:'+tcp.x.toFixed(3)+' Y:'+tcp.y.toFixed(3)+' Z:'+tcp.z.toFixed(3)+'m',6,h-6);
       }
       
       var joints=d.joints||{};
-      var jnames=['BaseRotate_0','UpperArmRotate_0','ForeArmRotate_0','WristRotate_0','PaddleRotate_0'];
-      var jshort=['Base ','Shldr','Elbw ','Wrist','Paddl'];
-      var jcols =['#00ff88','#00aaff','#ffaa00','#ff5555','#ff55ff'];
+      var jns=['BaseRotate_0','UpperArmRotate_0','ForeArmRotate_0','WristRotate_0','PaddleRotate_0'];
+      var jsh=['Base ','Shldr','Elbw ','Wrist','Paddl'];
+      var jcl=['#00ff88','#00aaff','#ffaa00','#ff5555','#ff55ff'];
       ctx.font='10px Consolas';
-      for(var i=0;i<jnames.length;i++){
-        var deg=((joints[jnames[i]]||0)*180/Math.PI).toFixed(1);
-        ctx.fillStyle=jcols[i];
-        ctx.fillText(jshort[i]+': '+deg+'\u00b0', w-80, 12+i*12);
+      for(var i=0;i<jns.length;i++){
+        var deg=((joints[jns[i]]||0)*180/Math.PI).toFixed(1);
+        ctx.fillStyle=jcl[i]; ctx.fillText(jsh[i]+': '+deg+'\u00b0',w-82,12+i*13);
       }
-      ctx.fillStyle='#555'; ctx.font='10px Consolas';
-      ctx.fillText('\u2190 left(-Y)   right(+Y) \u2192', cx-60, topBaseY+12);
-      ctx.fillText('\u2191 fwd(-X)', 4, 20);
-      ctx.fillText('\u2190 back(+X)   fwd(-X) \u2192', cx-60, floorY+12);
-      ctx.fillText('\u2191 Z(up)', 4, h2+20);
     }
 
     function drawVisualizations(d) {

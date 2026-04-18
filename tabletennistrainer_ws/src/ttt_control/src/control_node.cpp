@@ -10,20 +10,15 @@
 #include <mutex>
 #include <atomic>
 #include <cmath>
-
-// Subscribes to /ball_trajectory/predicted, transforms the target point into
-// world frame, then sends a pose goal to MoveIt's move_group (armgroup,
-// paddle_tcp end-effector). MoveIt runs KDL IK and drives the armgroup_controller,
-// which publishes /joint_states to ttt_hardware
+#include <algorithm>
 
 class ControlNode : public rclcpp::Node {
 public:
     ControlNode() : Node("ttt_control_node"), new_target_(false)
     {
         this->declare_parameter("update_rate_hz",  10.0);
-        this->declare_parameter("planning_time_s",  0.1);  // planning budget (ms)
-        this->declare_parameter("return_delay_ms",  100);  // delay before returning home after swing
-        this->declare_parameter("speed_multiplier", 1.0);  // Overdrive multiplier to bypass slow URDF limits
+        this->declare_parameter("planning_time_s",  5.0);
+        this->declare_parameter("speed_multiplier", 1.0);  
 
         tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -36,34 +31,27 @@ public:
             "/arm_named_target", 10,
             std::bind(&ControlNode::armCmdCallback, this, std::placeholders::_1));
 
+        stm_cmd_pub_ = this->create_publisher<std_msgs::msg::String>("/stm_cmd", 10);
+
         RCLCPP_INFO(this->get_logger(), "TTT Control node ready — waiting for ball trajectory");
     }
 
-    // Called from main after the executor is already spinning so that
-    // MoveGroupInterface can reach the move_group action server.
     void run_moveit()
     {
         move_group_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
             shared_from_this(), "armgroup");
 
         move_group_->setEndEffectorLink("paddle_tcp");
-        // OMPL RRTConnect for ball tracking (handles position-only Cartesian goals).
         move_group_->setPlannerId("RRTConnect");
         move_group_->setPlanningTime(this->get_parameter("planning_time_s").as_double());
-        move_group_->setNumPlanningAttempts(1);
+        move_group_->setNumPlanningAttempts(10);
         move_group_->setMaxVelocityScalingFactor(1.0);
         move_group_->setMaxAccelerationScalingFactor(1.0);
-
-        // Ensure MoveIt plans using the exact frame we are transforming our targets into
         move_group_->setPoseReferenceFrame("root");
 
-        RCLCPP_INFO(this->get_logger(),
-            "MoveIt ready | group: armgroup | end-effector: paddle_tcp | planning time: %.3f s",
-            this->get_parameter("planning_time_s").as_double());
-
         rclcpp::Rate rate(this->get_parameter("update_rate_hz").as_double());
-
         double speed_mult = this->get_parameter("speed_multiplier").as_double();
+
         auto overdrive_trajectory = [speed_mult](moveit::planning_interface::MoveGroupInterface::Plan& p) {
             if (speed_mult <= 1.0) return;
             for (auto& pt : p.trajectory_.joint_trajectory.points) {
@@ -76,8 +64,50 @@ public:
             }
         };
 
+        // Extract final waypoint, apply STM32 offsets, and fire once!
+        auto send_goal_to_stm = [this](moveit::planning_interface::MoveGroupInterface::Plan& p) {
+            if (p.trajectory_.joint_trajectory.points.empty()) return;
+
+            auto final_point = p.trajectory_.joint_trajectory.points.back();
+            auto joint_names = p.trajectory_.joint_trajectory.joint_names;
+            
+            std::vector<std::string> order = {"BaseRotate_0", "UpperArmRotate_0", "ForeArmRotate_0", "WristRotate_0", "PaddleRotate_0"};
+            
+            // STM32 hardware zero-offsets (+15 shoulder, +25 elbow)
+            float offsets[5] = {0.0f, 15.0f, 25.0f, 0.0f, 0.0f}; 
+            float degs[5] = {0};
+
+            for (size_t i = 0; i < 5; i++) {
+                auto it = std::find(joint_names.begin(), joint_names.end(), order[i]);
+                if (it != joint_names.end()) {
+                    int idx = std::distance(joint_names.begin(), it);
+                    degs[i] = (final_point.positions[idx] * (180.0 / M_PI)) + offsets[i];
+                }
+            }
+
+            // Deduplication: Only fire a new UDP packet if the goal has changed by > 0.1 degrees
+            bool significant_change = false;
+            for (size_t i = 0; i < 5; i++) {
+                if (std::abs(degs[i] - last_degs_[i]) > 0.1f) {
+                    significant_change = true;
+                    break;
+                }
+            }
+            if (!significant_change) return; // Skip redundant packets
+            
+            for (size_t i = 0; i < 5; i++) last_degs_[i] = degs[i];
+
+            std::ostringstream ss;
+            ss << "M " << std::fixed << std::setprecision(2) 
+               << degs[0] << " " << degs[1] << " " << degs[2] << " " << degs[3] << " " << degs[4];
+               
+            std_msgs::msg::String msg;
+            msg.data = ss.str();
+            stm_cmd_pub_->publish(msg);
+            RCLCPP_INFO(this->get_logger(), "Fired Goal to STM32: %s", msg.data.c_str());
+        };
+
         while (rclcpp::ok()) {
-            // Named target commands 
             std::string named_target;
             bool do_named = false;
             {
@@ -85,23 +115,18 @@ public:
                 if (new_named_target_) {
                     named_target = pending_named_target_;
                     new_named_target_ = false;
-                    new_target_ = false;  // discard any queued ball target
+                    new_target_ = false;
                     do_named = true;
                 }
             }
             if (do_named) {
-                RCLCPP_INFO(this->get_logger(), "Moving to named target: '%s'", named_target.c_str());
-                // Named targets are joint-space goals — use OMPL RRTConnect (reliable,
-                // no IK required since joint values come directly from the SRDF).
                 move_group_->setPlannerId("RRTConnect");
                 move_group_->setNamedTarget(named_target);
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 if (move_group_->plan(plan) == moveit::core::MoveItErrorCode::SUCCESS) {
                     overdrive_trajectory(plan);
+                    send_goal_to_stm(plan); // SEND HARDWARE PACKET ONCE
                     move_group_->execute(plan);
-                    RCLCPP_INFO(this->get_logger(), "Named target '%s' executed", named_target.c_str());
-                } else {
-                    RCLCPP_WARN(this->get_logger(), "Plan failed for named target '%s'", named_target.c_str());
                 }
                 rate.sleep();
                 continue;
@@ -114,99 +139,24 @@ public:
                     target = latest_target_;
                 }
 
-                // Use position-only IK because locking global orientation on a 4/5-DOF arm 
-                // forces the base to twist 180 degrees to maintain the paddle's static yaw angle.
+                
+
                 move_group_->setPositionTarget(target.position.x, target.position.y, target.position.z, "paddle_tcp");
-                move_group_->setGoalPositionTolerance(0.08);   // 8cm — ball interception tolerance
+                move_group_->setGoalPositionTolerance(0.08);   
 
-                moveit_msgs::msg::Constraints constraints;
-
-                // Prevent the arm from spinning 180 degrees (glitching backwards) by constraining the base joint
-                moveit_msgs::msg::JointConstraint base_constraint;
-                base_constraint.joint_name = "BaseRotate_0";
-                base_constraint.position = 0.0;          // Center of table
-                base_constraint.tolerance_above = 1.50;  // Widen to ~85 deg to allow reaching extreme right
-                base_constraint.tolerance_below = 1.50;  // Widen to ~85 deg to allow reaching extreme left
-                base_constraint.weight = 1.0;
-                constraints.joint_constraints.push_back(base_constraint);
-
-                // Prevent the elbow from unwinding all the way around (-240° URDF range).
-                // Without this, RRTConnect finds a valid but unnatural path through ~-227°.
-                // Clamping to -2.5–0.5 rad keeps the arm in a natural forward-reach posture.
-                moveit_msgs::msg::JointConstraint elbow_constraint;
-                elbow_constraint.joint_name = "ForeArmRotate_0";
-                elbow_constraint.position = -1.0;        // Natural mid-range hitting posture
-                elbow_constraint.tolerance_above = 1.5;  // Up to +0.5 rad (URDF limit)
-                elbow_constraint.tolerance_below = 1.5;  // Down to -2.5 rad — prevents going all the way around
-                elbow_constraint.weight = 1.0;
-                constraints.joint_constraints.push_back(elbow_constraint);
-
-                // Keep the paddle face toward the table (prevents paddle from spinning freely during IK solve)
-                moveit_msgs::msg::JointConstraint paddle_constraint;
-                paddle_constraint.joint_name = "PaddleRotate_0";
-                paddle_constraint.position = 0.0;        // Ready state angle (paddle faces table)
-                paddle_constraint.tolerance_above = 0.8; // ~46° of rotation allowed
-                paddle_constraint.tolerance_below = 0.8;
-                paddle_constraint.weight = 0.8;
-                constraints.joint_constraints.push_back(paddle_constraint);
-
-                // Keep the wrist near its "ready" angle so the paddle face stays vertical
-                moveit_msgs::msg::JointConstraint wrist_constraint;
-                wrist_constraint.joint_name = "WristRotate_0";
-                wrist_constraint.position = -1.08;       // Ready state angle
-                wrist_constraint.tolerance_above = 3.14;  // Completely relax to stop Error -27
-                wrist_constraint.tolerance_below = 3.14;
-                wrist_constraint.weight = 0.8;
-                constraints.joint_constraints.push_back(wrist_constraint);
-
-                move_group_->setPathConstraints(constraints);
+                // ALL CONFLICTING CONSTRAINTS REMOVED!
+                move_group_->clearPathConstraints();
 
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
-
-                RCLCPP_INFO(this->get_logger(),
-                    "Planning to (%.3f, %.3f, %.3f) [root frame]",
-                    target.position.x, target.position.y, target.position.z);
                 auto result = move_group_->plan(plan);
                 if (result == moveit::core::MoveItErrorCode::SUCCESS) {
                     overdrive_trajectory(plan);
+                    send_goal_to_stm(plan); // SEND HARDWARE PACKET ONCE
                     move_group_->execute(plan);
-                    RCLCPP_INFO(this->get_logger(), "Executed plan → table (%.3f, %.3f, %.3f)",
-                        target.position.x, target.position.y, target.position.z);
-
-                    // Return to ready position after swing.
-                    // Set start state from the last point of the executed trajectory so
-                    // the planner doesn't use stale joint_states from the broadcaster.
-                    std::this_thread::sleep_for(
-                        std::chrono::milliseconds(
-                            static_cast<int>(this->get_parameter("return_delay_ms").as_int())));
-                    {
-                        const auto & last_pt =
-                            plan.trajectory_.joint_trajectory.points.back();
-                        const auto & joint_names =
-                            plan.trajectory_.joint_trajectory.joint_names;
-                        moveit::core::RobotStatePtr start_state =
-                            move_group_->getCurrentState(2.0);
-                        start_state->setVariablePositions(joint_names, last_pt.positions);
-                        move_group_->setStartState(*start_state);
-                    }
-                    move_group_->setPlannerId("RRTConnect");
-                move_group_->clearPathConstraints(); // Clear constraints so it can return home freely
-                    move_group_->setNamedTarget("ready");
-                    moveit::planning_interface::MoveGroupInterface::Plan ready_plan;
-                    if (move_group_->plan(ready_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
-                        overdrive_trajectory(ready_plan);
-                        move_group_->execute(ready_plan);
-                        RCLCPP_INFO(this->get_logger(), "Returned to ready");
-                    }
-                    move_group_->setStartStateToCurrentState();
                     
-                    // Discard any stale predictions that arrived while blocking for the swing execution
-                    new_target_ = false;
+                    // Auto-return removed. Arm stays exactly where it swings to!
                 } else {
-                    move_group_->clearPathConstraints();
-                    RCLCPP_WARN(this->get_logger(),
-                        "Planning failed (code %d) for target (%.3f, %.3f, %.3f)",
-                        result.val, target.position.x, target.position.y, target.position.z);
+                    RCLCPP_WARN(this->get_logger(), "IK Planning failed for Root Frame -> X: %.3f, Y: %.3f, Z: %.3f", target.position.x, target.position.y, target.position.z);
                 }
             }
             rate.sleep();
@@ -227,24 +177,20 @@ private:
         in_base.header.stamp = msg->header.stamp;
         in_base.header.frame_id = "root";
 
-        // The vision system "table" frame is LEFT-HANDED: X=Right, Y=Up, Z=Depth (Forward).
-        // The robot "root" frame is RIGHT-HANDED: X=Back, Y=Right, Z=Up.
-        // tf2 cannot safely transform left-handed to right-handed without inverting an axis
-        // and causing the arm to swing the wrong way. We manually map the coordinates here.
-        
-        in_base.point.x = -(msg->point.z + 1.4732);      // Table Depth (+Z) maps to Root Forward (-X)
-        in_base.point.y = msg->point.x;                  // Table Right (+X) maps to Root Right (+Y)
-        in_base.point.z = msg->point.y;                  // Table Up (+Y) maps to Root Up (+Z)
+        // Transform from "table" frame to MoveIt "root" frame:
+        // Root X (Forward) = Table Z (Depth). Robot is at Z = -1.4732 relative to the net (Z=0).
+        in_base.point.x = msg->point.z + 1.4732;
+        // Root Y (Left) = -Table X (Right). Fix inverted left/right swing.
+        in_base.point.y = -msg->point.x;
+        // Root Z (Up) = Table Y (Height).
+        in_base.point.z = msg->point.y;
 
-        // Safety Reject
+        RCLCPP_INFO(this->get_logger(), "Received Table Frame  -> X: %.3f, Y: %.3f, Z: %.3f", msg->point.x, msg->point.y, msg->point.z);
+        RCLCPP_INFO(this->get_logger(), "Converted Root Frame  -> X: %.3f, Y: %.3f, Z: %.3f", in_base.point.x, in_base.point.y, in_base.point.z);
+
         if (std::abs(in_base.point.x) > 5.0 || std::abs(in_base.point.y) > 5.0 || std::abs(in_base.point.z) > 5.0) {
             return;
         }
-
-        RCLCPP_INFO(this->get_logger(),
-            "\n== TARGET MAPPED ==\n TABLE: X=%+.3f (right), Y=%+.3f (height), Z=%+.3f (depth)\n ROOT:  X=%+.3f (back), Y=%+.3f (right), Z=%+.3f (height)",
-            msg->point.x, msg->point.y, msg->point.z,
-            in_base.point.x, in_base.point.y, in_base.point.z);
 
         std::lock_guard<std::mutex> lock(mutex_);
         latest_target_.position.x  = in_base.point.x;
@@ -256,6 +202,7 @@ private:
 
     rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr             arm_cmd_sub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr                stm_cmd_pub_;
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface>    move_group_;
     std::shared_ptr<tf2_ros::Buffer>           tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -265,22 +212,17 @@ private:
     std::atomic<bool> new_target_;
     bool new_named_target_{false};
     std::string pending_named_target_;
+    float last_degs_[5] = {-999.0f, -999.0f, -999.0f, -999.0f, -999.0f};
 };
 
 int main(int argc, char ** argv)
 {
     rclcpp::init(argc, argv);
-
     auto node = std::make_shared<ControlNode>();
-
-    // Spin in background so MoveGroupInterface can connect to move_group
     rclcpp::executors::SingleThreadedExecutor executor;
     executor.add_node(node);
     std::thread spin_thread([&executor]() { executor.spin(); });
-
-    // MoveIt planning loop — blocks until shutdown
     node->run_moveit();
-
     executor.cancel();
     spin_thread.join();
     rclcpp::shutdown();

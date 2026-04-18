@@ -1,0 +1,35 @@
+planning_plugin: ompl_interface/OMPLPlanner
+request_adapters: >-
+  default_planner_request_adapters/AddTimeOptimalParameterization
+  default_planner_request_adapters/ResolveConstraintFrames
+  default_planner_request_adapters/FixWorkspaceBounds
+  default_planner_request_adapters/FixStartStateBounds
+  default_planner_request_adapters/FixStartStateCollision
+  default_planner_request_adapters/FixStartStatePathConstraints
+start_state_max_bounds_error: 0.1
+
+armgroup:
+  default_planner_config: RRTConnect
+  planner_configs:
+    - RRTConnect
+    - RRT
+    - EST
+    - KPIECE
+  RRTConnect:
+    type: geometric::RRTConnect
+    range: 0.0
+  RRT:
+    type: geometric::RRT
+    range: 0.0
+    goal_bias: 0.05
+  EST:
+    type: geometric::EST
+    range: 0.0
+    goal_bias: 0.05
+  KPIECE:
+    type: geometric::KPIECE1
+    range: 0.0
+    goal_bias: 0.05
+    border_fraction: 0.9
+    failed_expansion_score_factor: 0.5
+    min_valid_path_fraction: 0.5

@@ -5,6 +5,7 @@ from moveit_configs_utils.launches import generate_move_group_launch
 def generate_launch_description():
     moveit_config = (
         MoveItConfigsBuilder("mainarmass", package_name="ttt_control")
+        .robot_description_kinematics()
         .planning_pipelines(
             pipelines=["ompl", "pilz_industrial_motion_planner"],
             default_planning_pipeline="ompl",
