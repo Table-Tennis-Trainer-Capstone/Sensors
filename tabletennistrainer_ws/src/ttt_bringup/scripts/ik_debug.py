@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-IK Debug Tool — fully standalone, no Jetsons or STM hardware required.
+IK Debug Tool — fully standalone, no STM hardware required.
 
 Launches the full robot control stack locally (mock hardware) and lets you
 send move commands, watch joint angles update in real time, and preview
 the exact motor commands that would be sent to the STM.
 
-Usage (WSL):
-  # Basic — uses all DDS interfaces and opens RViz automatically:
+Usage (Jetson / local):
+  # Basic — uses all DDS interfaces (RViz skipped if no display):
   python3 ik_debug.py --software
 
-  # Run headless (web dashboard only, no RViz window):
+  # Force headless (web dashboard only, no RViz window):
   python3 ik_debug.py --software --no-rviz
 """
 
@@ -24,8 +24,8 @@ parser.add_argument('--software', action='store_true',
                     help='Launch robot stack locally (mock hardware, no Jetsons)')
 parser.add_argument('--no-rviz', action='store_true',
                     help='Do NOT launch RViz2 automatically')
-parser.add_argument('--ws', default='/mnt/c/Users/lucia/work/capstone/Sensors/tabletennistrainer_ws',
-                    help='Path to built workspace (default: WSL mount of this repo)')
+parser.add_argument('--ws', default='/home/capstone-nano2/Sensors/tabletennistrainer_ws',
+                    help='Path to built workspace (default: Jetson workspace)')
 parser.add_argument('--iface', default='',
                     help='NIC IP for CycloneDDS (e.g. 172.26.174.93)')
 parser.add_argument('--port', type=int, default=5001, help='Web server port (default 5001)')
@@ -160,6 +160,23 @@ class SoftwareLauncher:
         self._launch('ros2 launch ttt_control move_group.launch.py', 'move_group')
         time.sleep(6)
 
+        # mock_components/GenericSystem publishes joint states with timestamp 0 in Humble,
+        # causing MoveIt trajectory execution to abort. Disable the start-state timestamp
+        # check so software-mode execution proceeds normally.
+        for param, val in [
+            ('trajectory_execution.allowed_start_tolerance', '0.0'),
+            # Allow wrist to start outside URDF bounds (hardware homes to 0°, URDF min is 2.09 rad).
+            # MoveIt clamps the start state to the nearest valid joint value instead of aborting.
+            ('start_state_max_bounds_error', '3.15'),
+        ]:
+            subprocess.run(
+                ['bash', '-c',
+                 f'{self._source_cmd()} && '
+                 f'export ROS_DOMAIN_ID=42 && '
+                 f'export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && '
+                 f'ros2 param set /move_group {param} {val}'],
+                capture_output=True)
+
         for frame_args, label in [
             # world → table_center: RSP then handles the full chain (table_center → root → Base → ...)
             ('--x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id world --child-frame-id table_center', 'tf_world_table_center'),
@@ -180,7 +197,11 @@ class SoftwareLauncher:
     def stop(self):
         for label, p in self._procs: p.terminate()
 
-launcher = SoftwareLauncher(args.ws, launch_rviz=not args.no_rviz) if args.software else None
+_has_display = bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+_launch_rviz = not args.no_rviz and _has_display
+if args.software and not args.no_rviz and not _has_display:
+    print("⚠️  No display detected — skipping RViz (pass --no-rviz to suppress this warning)")
+launcher = SoftwareLauncher(args.ws, launch_rviz=_launch_rviz) if args.software else None
 
 # ── Shared state ───────────────────────────────────────────────────────────────
 class State:

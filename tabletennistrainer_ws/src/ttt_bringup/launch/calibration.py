@@ -14,15 +14,18 @@ PARAMS = {
 
     # ── Ball Detection (vision_node) ──────────────────────────────────────────
     'min_area':             20,   # Ignore tiny 4x5 pixel noise fragments
-    'max_area':             295,  # Tightened: ball is rarely >200px area. Rejects paddles/hands.
-    'motion_threshold':     12,   # Bumped slightly to reject micro-vibrations on the white lines
-    'min_contrast':         55,   # Slightly raised to ignore faint reflection noise
-    'dilate_iters':          1,
+    'max_area':             500, # UNCAPPED: Prevents dropping the ball as it gets closer to the camera and grows in pixel size!
+    'motion_threshold':     10,   # Lowered: prevents dropping the ball when it motion-blurs
+    'min_contrast':         51,   # Raised: Mandates the object be bright white/orange. Rejects dark matte paddles.
+    'dilate_iters':          2,   # Increased: merges broken paddle edge fragments into one giant blob > max_area
     'edge_margin':          10,   # Reduced: Reclaims the outer edges of the camera lens
-    'kf_gate_px':          120.0, # Widened slightly: Allows the tracker to follow faster sudden movements
-    'kf_process_noise':     0.08, # Increased: Reduces smoothing inertia so the tracker feels "snappy" again
-    'table_roi_left':     [156, 145, 388, 81, 563, 195, 241, 385],
-    'table_roi_right':    [294, 54, 524, 139, 411, 372, 120, 156],
+    'kf_gate_px':          200.0, # Widened: Allows the KF to "catch" the ball during high-G impacts and direction changes
+    'kf_process_noise':     0.5,  # Increased: Makes the tracker trust new measurements instantly over its old velocity model
+    'consistency_min':       1,
+    'frame_delay':           5,   # Frames back for motion diff (5 = 21ms @ 240fps; less smear)
+    'max_aspect_ratio':      2.2, # Tightened: Rejects long sweeping arms and paddle edges
+    'table_roi_left':     [135, 218, 330, 146, 479, 206, 183, 353],
+    'table_roi_right':    [253, 160, 454, 200, 418, 354, 124, 232],
 
     # ── Stereo Camera Intrinsic Lenses ────────────────────────────────────────
     'fx':                448.0,
@@ -33,19 +36,19 @@ PARAMS = {
     # ── Stereo Alignment & Origin Shift (stereo_node) ─────────────────────────
     'baseline_m':        1.397,   # Distance between cameras
     'max_sync_age_ms':      35,   # Increased: Tolerates higher network jitter between Jetson A and B
-    'net_dist_z':         0.61,   # Z-distance from cameras to the physical net
-    'height_left':        0.7,   # Physical height of Left Cam
-    'height_right':       0.53,   # Physical height of Right Cam
-    'pan_left_deg':       20.9,
-    'pan_right_deg':      23.5,
-    'tilt_left_deg':      31.5,
-    'tilt_right_deg':     29.8,
-    'roll_left_deg':     -11.6,
-    'roll_right_deg':      14.1,
+    'net_dist_z':         1.03,   # Z-distance from cameras to the physical net (Adjusted +0.3m to zero the net)
+    'height_left':        0.23,   # Physical height of Left Cam
+    'height_right':       0.23,   # Physical height of Right Cam
+    'pan_left_deg':       27.3,
+    'pan_right_deg':      20.7,
+    'tilt_left_deg':      11.3,
+    'tilt_right_deg':     9.5,
+    'roll_left_deg':     -15.9,
+    'roll_right_deg':      8.5,
     'limit_x_m':           1.5,   # 3D bounding box (width max +/-)
-    'limit_y_top_m':       2.3,   # 3D bounding box (height max)
+    'limit_y_top_m':       0.8,   # 3D bounding box (height max, ~2 ft above table)
     'limit_y_bottom_m':   -0.2,   # 3D bounding box (height min)
-    'limit_z_m':           2.5,   # 3D bounding box (depth max +/-)
+    'limit_z_m':           1.25,  # 3D bounding box: Ignore the last 12cm of the table to blind the system to the paddle
 
     # ── Robust Trajectory Prediction (trajectory_node) ────────────────────────
     'lookahead_ms':        150,   # How far AFTER the bounce to intercept the ball (ms)
@@ -58,12 +61,13 @@ PARAMS = {
     'restitution':        0.85,   # Energy retained after bounce (0–1)
     'min_incoming_speed':  0.5,   # MIN SPEED: Ignore shots slower than 0.5 m/s
     'net_margin_z':       -0.2,   # ORIGIN GATE: Shot must have crossed Z > -0.2m
-    'max_track_z':         1.5,   # END OF TABLE: Ignore noise beyond this Z depth
-    'max_velocity':        18.0,  # SPEED LIMIT: Ignore tracking jumps > 18 m/s (~40mph, pro TT top speed)
+    'max_track_z':         1.25,  # END OF TABLE: Matches limit_z_m to ignore paddle strikes
+    'max_velocity':        35.0,  # SPEED LIMIT: Raised further to prevent dropping frames on momentary stereo noise spikes
 
     # ── Arm Control (control_node) ────────────────────────────────────────────
-    'update_rate_hz':     60.0,   # How often the control loop checks for new ball targets
-    'planning_time_s':     0.05,   # Max time MoveIt spends finding a motion plan (keep short for real-time)
+    'update_rate_hz':     240.0,   # How often the control loop checks for new ball targets
+    'planning_time_s':     0.015,   # Max time MoveIt spends finding a motion plan (keep short for real-time)
     'return_delay_ms':     50,   # Time (ms) to hold the swing position before returning home
     'speed_multiplier':    1.0,   # Overdrive scaling factor to bypass default URDF velocity limits
+
 }

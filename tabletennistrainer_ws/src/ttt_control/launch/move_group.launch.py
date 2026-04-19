@@ -1,5 +1,6 @@
 from moveit_configs_utils import MoveItConfigsBuilder
-from moveit_configs_utils.launches import generate_move_group_launch
+from launch import LaunchDescription
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -12,4 +13,27 @@ def generate_launch_description():
         )
         .to_moveit_configs()
     )
-    return generate_move_group_launch(moveit_config)
+
+    move_group_node = Node(
+        package="moveit_ros_move_group",
+        executable="move_group",
+        output="screen",
+        parameters=[
+            moveit_config.to_dict(),
+            {
+                "publish_robot_description_semantic": True,
+                "allow_trajectory_execution": True,
+                "publish_planning_scene": True,
+                "publish_geometry_updates": True,
+                "publish_state_updates": True,
+                "publish_transforms_updates": True,
+                "monitor_dynamics": False,
+                # Allow wrist to start at hardware home (0°) even though URDF
+                # lower limit is 2.09 rad. MoveIt clamps to the nearest valid
+                # value instead of rejecting the start state entirely.
+                "ompl.start_state_max_bounds_error": 3.15,
+            },
+        ],
+    )
+
+    return LaunchDescription([move_group_node])

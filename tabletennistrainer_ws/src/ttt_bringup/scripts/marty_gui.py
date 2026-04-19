@@ -1265,17 +1265,16 @@ class SystemLauncher(threading.Thread):
             "ros2 launch ttt_control rsp.launch.py &\n"
             "ros2 launch ttt_control move_group.launch.py &\n"
             "ros2 launch ttt_control controllers.launch.py &\n"
-            # world frame: X=lateral, Y=up, Z=depth (Y-up convention from ball tracking)
-            # root frame: X=forward, Y=left, Z=up 
-            # FIX — normalized quaternion for world(X=right,Y=up,Z=depth) → root(X=fwd,Y=left,Z=up):
-            "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z -1.4732 --qx -0.7071 --qy 0 --qz 0 --qw 0.7071 --frame-id world --child-frame-id root &\n"
-            # Lock down the MoveIt SRDF links to our perfect manual translation
-            "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id root --child-frame-id robot_base &\n"
-            "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id root --child-frame-id table_center &\n"
+            # Anchor the URDF root link (table_center) to world. The URDF joint
+            # center_to_robot already offsets root 1.37m from table_center.
+            "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id world --child-frame-id table_center &\n"
+            # Logical table frame used by control_node and stereo/trajectory nodes
             "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id world --child-frame-id table &\n"
+            "sleep 5 && ros2 param set /move_group trajectory_execution.allowed_start_tolerance 0.0 && "
+            "ros2 param set /move_group start_state_max_bounds_error 3.15 &\n"
             "ros2 run ttt_control control_node &\n"
             "ros2 run ttt_hardware hardware_node --ros-args -p stm_ip:=192.168.1.100 -p stm_port:=7777 -p joint_topic:=/joint_states &\n"
-            
+
             "wait\n"
         )
         

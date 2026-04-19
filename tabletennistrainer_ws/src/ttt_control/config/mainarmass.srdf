@@ -17,14 +17,18 @@
     </group>
     <group_state name="home" group="armgroup">
         <joint name="BaseRotate_0" value="0.0"/>
-        <joint name="UpperArmRotate_0" value="-0.261799"/> <joint name="ForeArmRotate_0" value="-0.436332"/> <joint name="WristRotate_0" value="0.0"/>
-        <joint name="PaddleRotate_0" value="0.0"/>
+        <joint name="UpperArmRotate_0" value="-0.261799"/>
+        <joint name="ForeArmRotate_0" value="-0.436332"/>
+        <joint name="WristRotate_0" value="3.14"/>
+        <joint name="PaddleRotate_0" value="1.5708"/>
     </group_state>
 
     <group_state name="ready" group="armgroup">
         <joint name="BaseRotate_0" value="0.0"/>
-        <joint name="UpperArmRotate_0" value="0.4319"/> <joint name="ForeArmRotate_0" value="0.15"/> <joint name="WristRotate_0" value="0.0"/>
-        <joint name="PaddleRotate_0" value="0.0"/>
+        <joint name="UpperArmRotate_0" value="0.3319"/>
+        <joint name="ForeArmRotate_0" value="0.15"/>
+        <joint name="WristRotate_0" value="2.7925"/>
+        <joint name="PaddleRotate_0" value="1.5708"/>
     </group_state>
 
     <!--END EFFECTOR: Purpose: Represent information about an end effector.-->

@@ -25,6 +25,8 @@ public:
         this->declare_parameter("hysteresis_r", 12);
         this->declare_parameter("hysteresis_thresh", 140);
         this->declare_parameter("table_roi", std::vector<int64_t>{});
+        this->declare_parameter("frame_delay", 5);
+        this->declare_parameter("max_aspect_ratio", 3.5);
 
         // NEW: Static mode for calibration
         this->declare_parameter("static_mode", false);
@@ -43,6 +45,8 @@ public:
         hysteresis_r_ = this->get_parameter("hysteresis_r").as_int();
         hysteresis_thresh_ = this->get_parameter("hysteresis_thresh").as_int();
         static_mode_ = this->get_parameter("static_mode").as_bool();
+        frame_delay_ = this->get_parameter("frame_delay").as_int();
+        max_aspect_ratio_ = (float)this->get_parameter("max_aspect_ratio").as_double();
 
         auto roi_vec = this->get_parameter("table_roi").as_integer_array();
         if (roi_vec.size() == 8) {
@@ -68,7 +72,7 @@ public:
         cv::setIdentity(kf_.measurementNoiseCov, cv::Scalar::all(0.1f));
         cv::setIdentity(kf_.errorCovPost, cv::Scalar::all(1.0f));
 
-        history_ring_.resize(frame_delay_ + 1);
+        history_ring_.resize(frame_delay_ + 1);  // sized from parameter
 
         param_cb_ = this->add_on_set_parameters_callback(
             [this](const std::vector<rclcpp::Parameter>& params) {
@@ -159,13 +163,11 @@ private:
 
         if (!table_roi_.empty() && (roi_mask_.empty() || roi_mask_.size() != img.size())) {
             roi_mask_ = cv::Mat::zeros(img.size(), CV_8UC1);
-            // Extend the table polygon to the full image height so the ball is
-            // tracked at any elevation (in the air above or below the table surface)
-            // while still staying within the table's left-right (X) extent.
+            // Extend the table polygon upward only — ball flies above the table but
+            // the bottom edge stays strict to block background behind the table.
             std::vector<cv::Point> extended_roi = table_roi_;
             for (const auto& pt : table_roi_) {
-                extended_roi.push_back(cv::Point(pt.x, 0));             // top of image
-                extended_roi.push_back(cv::Point(pt.x, img.rows - 1)); // bottom of image
+                extended_roi.push_back(cv::Point(pt.x, 0)); // extend up to top of frame
             }
             std::vector<cv::Point> extended_hull;
             cv::convexHull(extended_roi, extended_hull);
@@ -217,49 +219,52 @@ private:
 
         float best_x = -1.0f, best_y = -1.0f, best_r = 0.0f;
         float best_score = -1.0f;
-        float best_brightness = 0.0f;
         bool found = false;
 
         for (const auto& contour : contours) {
             cv::Rect bbox = cv::boundingRect(contour);
             double bbox_area = bbox.width * bbox.height;
-            if (bbox_area < min_area_ || bbox_area > max_area_) continue;
+            double actual_area = cv::contourArea(contour);
 
-            // Reject highly elongated shapes (like sweeping arms and paddles)
-            float aspect_ratio = static_cast<float>(bbox.width) / bbox.height;
-            if (aspect_ratio < 0.4f || aspect_ratio > 2.5f) continue; // Highly strict: blurred balls rarely exceed 1.5:1
+            // Use true pixel area to reject blobs that are too small or too large
+            if (actual_area < min_area_ || actual_area > max_area_) continue;
 
-            // Circularity check: Ping pong balls are round, sweeping paddle edges are jagged lines
-            double contour_area = cv::contourArea(contour);
+            // Reject elongated blobs — arms and paddles sweep and create high aspect-ratio blobs
+            float aspect = (float)std::max(bbox.width, bbox.height) /
+                           (float)std::max(std::min(bbox.width, bbox.height), 1);
+            if (aspect > max_aspect_ratio_) continue;
+
+            // Circularity check: Reject irregular, stringy, or crescent shapes (paddle edges)
+            // A perfect circle is 1.0. Motion-blurred balls are pill-shaped (~0.5 - 0.8).
+            // Paddle swings create long wavy lines/crescents that are usually < 0.3.
             double perimeter = cv::arcLength(contour, true);
-            double circularity = 1.0;
-            // Only enforce circularity on blobs large enough to have a measurable shape.
-            // Tiny distant balls (<16px area) are just pixelated squares and will fail math checks!
-            if (perimeter > 0.0 && bbox_area >= 16.0) {
-                circularity = 4.0 * CV_PI * contour_area / (perimeter * perimeter);
-                if (circularity < 0.55) continue; // Strict: blurred balls are ~0.8, jagged lines are <0.4
-            }
+            if (perimeter == 0) continue;
+            double circularity = (4.0 * CV_PI * actual_area) / (perimeter * perimeter);
+            if (circularity < 0.40) continue;
+
+            // Solidity check: Reject hollow/crescent shapes (like paddle motion edges)
+            // A ball is a solid streak or circle, filling a high percentage of its bounding box.
+            float fill_ratio = (float)(actual_area / bbox_area);
+            if (fill_ratio < 0.40f) continue; // Tightened: Ball streaks are solid (>0.4), paddle curves are hollow
 
             cv::Point2f center(bbox.x + bbox.width / 2.0f, bbox.y + bbox.height / 2.0f);
             if (center.x < edge_margin_ || center.x > img.cols - edge_margin_) continue;
             if (center.y < edge_margin_ || center.y > img.rows - edge_margin_) continue;
 
-            // CPU OPTIMIZATION: The GPU bitwise_and already enforced our min_contrast_ threshold.
-            // Skipping the CPU-bound cv::mean slice calculation saves critical microseconds per contour!
-            double brightness = 255.0;
-
             // KF PROXIMITY SCORING:
-            // If we have a track, prioritize the bright blob closest to the prediction!
-            // If we don't have a track, prioritize the most circular blob.
+            // If we have a track, prioritize the blob closest to the prediction.
+            // If we don't have a track, prioritize the largest blob (most motion energy).
             float score = 0.0f;
             if (kf_initialized_) {
                 float pred_x = kf_.statePre.at<float>(0);
                 float pred_y = kf_.statePre.at<float>(1);
                 float dist_sq = std::pow(center.x - pred_x, 2) + std::pow(center.y - pred_y, 2);
-                if (dist_sq > kf_gate_px_sq_) continue; // Ignore white lines far away from the ball
-                score = 1000.0f / (std::sqrt(dist_sq) + 1.0f); // Closer = Higher Score
+                if (dist_sq > kf_gate_px_sq_) continue;
+            // Weight both proximity AND size. Prevents snapping to tiny noise fragments
+            // (like a 20px paddle edge) that happen to be closer than the fast-moving ball.
+            score = (2000.0f / (std::sqrt(dist_sq) + 1.0f)) + (float)actual_area;
             } else {
-                score = static_cast<float>(circularity * bbox_area);
+                score = static_cast<float>(bbox_area);
             }
 
             if (score > best_score) {
@@ -267,7 +272,6 @@ private:
                 best_x = center.x;
                 best_y = center.y;
                 best_r = std::max(bbox.width, bbox.height) / 2.0f;
-                best_brightness = static_cast<float>(brightness);
                 found = true;
             }
         }
@@ -318,7 +322,7 @@ private:
 
         if (kf_initialized_) {
             det_msg.x = kf_.statePost.at<float>(0); det_msg.y = kf_.statePost.at<float>(1);
-            det_msg.radius = found ? best_r : 0.0f; det_msg.confidence = found ? best_brightness : 0.0f;
+            det_msg.radius = found ? best_r : 0.0f; det_msg.confidence = found ? 255.0f : 0.0f;
         }
         detection_pub_->publish(det_msg);
     }
@@ -336,7 +340,8 @@ private:
 
     std::vector<cv::cuda::GpuMat> history_ring_;
     int history_idx_ = 0;
-    int frame_delay_ = 10;
+    int frame_delay_ = 5;
+    float max_aspect_ratio_ = 3.5f;
 
     int consistency_min_; std::deque<bool> consistency_buf_;
     cv::KalmanFilter kf_;

@@ -16,9 +16,10 @@ class ControlNode : public rclcpp::Node {
 public:
     ControlNode() : Node("ttt_control_node"), new_target_(false)
     {
-        this->declare_parameter("update_rate_hz",  10.0);
-        this->declare_parameter("planning_time_s",  5.0);
-        this->declare_parameter("speed_multiplier", 1.0);  
+        this->declare_parameter("update_rate_hz",  240.0);
+        this->declare_parameter("planning_time_s",  0.015);
+        this->declare_parameter("speed_multiplier", 5.0);
+        this->declare_parameter("intercept_x_offset", -0.25);
 
         tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -179,18 +180,16 @@ private:
 
         // Transform from "table" frame to MoveIt "root" frame:
         // Root X (Forward) = Table Z (Depth). Robot is at Z = -1.4732 relative to the net (Z=0).
-        in_base.point.x = msg->point.z + 1.4732;
-        // Root Y (Left) = -Table X (Right). Fix inverted left/right swing.
-        in_base.point.y = -msg->point.x;
+        // intercept_x_offset pulls the hit point toward the robot's end of the table (negative = closer).
+        double x_offset = this->get_parameter("intercept_x_offset").as_double();
+        in_base.point.x = msg->point.z + 1.4732 + x_offset;
+        // Root Y (Left) = Table X.
+        in_base.point.y = msg->point.x;
         // Root Z (Up) = Table Y (Height).
         in_base.point.z = msg->point.y;
 
         RCLCPP_INFO(this->get_logger(), "Received Table Frame  -> X: %.3f, Y: %.3f, Z: %.3f", msg->point.x, msg->point.y, msg->point.z);
         RCLCPP_INFO(this->get_logger(), "Converted Root Frame  -> X: %.3f, Y: %.3f, Z: %.3f", in_base.point.x, in_base.point.y, in_base.point.z);
-
-        if (std::abs(in_base.point.x) > 5.0 || std::abs(in_base.point.y) > 5.0 || std::abs(in_base.point.z) > 5.0) {
-            return;
-        }
 
         std::lock_guard<std::mutex> lock(mutex_);
         latest_target_.position.x  = in_base.point.x;

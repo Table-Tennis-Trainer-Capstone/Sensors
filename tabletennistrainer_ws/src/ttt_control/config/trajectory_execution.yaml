@@ -1,0 +1,9 @@
+moveit_manage_controllers: true
+
+trajectory_execution:
+  # mock_components/GenericSystem publishes joint states with timestamp 0 in Humble.
+  # Setting this to 0.0 disables the start-state timestamp validation so execution
+  # proceeds normally in software mode.
+  allowed_start_tolerance: 0.0
+  allowed_execution_duration_scaling: 1.2
+  allowed_goal_duration_margin: 0.5

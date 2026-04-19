@@ -38,20 +38,13 @@ def generate_launch_description():
             )
         ),
 
-        # Bridge table frame to robot_base (robot is mounted 1.4732m behind net, level with table)
+        # Anchor the URDF root (table_center) to the table coordinate frame.
+        # The URDF joint center_to_robot already places root 1.37m from table_center.
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
-            name='table_to_robot_base',
-            arguments=['0', '0', '0', '0', '0', '0', 'table', 'robot_base'],
-        ),
-
-        # Bridge URDF root link to TF tree (robot_base → root, identity transform)
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='robot_base_to_root',
-            arguments=['0', '0', '0', '0', '0', '0', 'robot_base', 'root'],
+            name='table_to_table_center',
+            arguments=['0', '0', '0', '0', '0', '0', 'table', 'table_center'],
         ),
 
         # Left Camera
@@ -85,6 +78,9 @@ def generate_launch_description():
                 'edge_margin': PARAMS['edge_margin'],
                 'kf_gate_px': PARAMS.get('kf_gate_px', 250.0),
                 'kf_process_noise': PARAMS.get('kf_process_noise', 0.05),
+                'consistency_min': PARAMS.get('consistency_min', 1),
+                'frame_delay': PARAMS.get('frame_delay', 5),
+                'max_aspect_ratio': PARAMS.get('max_aspect_ratio', 3.5),
                 **({'table_roi': PARAMS['table_roi_left']} if PARAMS['table_roi_left'] else {}),
             }],
             output='screen'
@@ -101,6 +97,14 @@ def generate_launch_description():
                 'cy': PARAMS['cy'],
                 'baseline_m': PARAMS['baseline_m'],
                 'max_sync_age_ms': PARAMS['max_sync_age_ms'],
+                'net_dist_m': PARAMS.get('net_dist_z', 0.52),
+                'height_m': (PARAMS.get('height_left', 0.7) + PARAMS.get('height_right', 0.53)) / 2.0,
+                'pan_left_deg': PARAMS.get('pan_left_deg', 15.0),
+                'pan_right_deg': PARAMS.get('pan_right_deg', 15.0),
+                'tilt_left_deg': PARAMS.get('tilt_left_deg', 45.0),
+                'tilt_right_deg': PARAMS.get('tilt_right_deg', 45.0),
+                'roll_left_deg': PARAMS.get('roll_left_deg', 0.0),
+                'roll_right_deg': PARAMS.get('roll_right_deg', 0.0),
                 'limit_x_m': PARAMS.get('limit_x_m', 1.5),
                 'limit_y_top_m': PARAMS.get('limit_y_top_m', 2.0),
                 'limit_y_bottom_m': PARAMS.get('limit_y_bottom_m', -0.2),

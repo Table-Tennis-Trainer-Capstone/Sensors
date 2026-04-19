@@ -1,6 +1,5 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
-
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -99,7 +98,11 @@ private:
             if (n > 0) {
                 buf[n] = '\0';
                 while (n > 0 && (buf[n - 1] == '\r' || buf[n - 1] == '\n')) buf[--n] = '\0';
-                RCLCPP_INFO(this->get_logger(), "STM reply: %s", buf);
+                // S1-S5 pos/tgt/err status lines → DEBUG (suppress terminal spam)
+                if (buf[0] == 'S' && buf[1] >= '1' && buf[1] <= '9')
+                    RCLCPP_DEBUG(this->get_logger(), "STM: %s", buf);
+                else
+                    RCLCPP_INFO(this->get_logger(), "STM reply: %s", buf);
             }
         }
     }

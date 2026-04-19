@@ -30,7 +30,8 @@ public:
         this->declare_parameter("min_incoming_speed", 0.5);
         this->declare_parameter("net_margin_z",      -0.2);
         this->declare_parameter("max_track_z",        1.15);
-        this->declare_parameter("max_velocity",       25.0);
+        this->declare_parameter("max_velocity",       15.0);
+        this->declare_parameter("max_y",               0.35); // reject user's arm/racket (arm >> 0.35m)
         // Per-stage minimum samples before publishing
         this->declare_parameter("stage1_min_samples",  2);
         this->declare_parameter("stage2_min_samples",  4);
@@ -45,6 +46,7 @@ public:
         net_margin_    = this->get_parameter("net_margin_z").as_double();
         max_track_z_   = this->get_parameter("max_track_z").as_double();
         max_velocity_  = this->get_parameter("max_velocity").as_double();
+        max_y_         = this->get_parameter("max_y").as_double();
         s1_min_        = this->get_parameter("stage1_min_samples").as_int();
         s2_min_        = this->get_parameter("stage2_min_samples").as_int();
         s3_min_        = this->get_parameter("stage3_min_samples").as_int();
@@ -162,6 +164,13 @@ private:
         // Ignore points physically beyond table end or well past robot
         if (bz > max_track_z_) return;
         if (bz < -0.5) return;  // ball rolled past robot, ignore
+        // Reject user's arm/racket: ball Y stays below max_y in normal play
+        if (by > max_y_) return;
+        // Once ball has crossed the net it cannot go back to opponent's side
+        if (ball_crossed_net_ && bz > 0.05) {
+            resetBuffer("post-net backward Z — user arm or new rally");
+            return;
+        }
 
         // Gap > 200 ms ⇒ new rally
         if (!buffer_.empty() && (t_abs - buffer_.back().t_abs > 0.2))
@@ -194,7 +203,7 @@ private:
                 double dist = std::hypot(std::hypot(bx-buffer_.back().x, by-buffer_.back().y),
                                          bz-buffer_.back().z);
                 if ((dist/dt) > max_velocity_) {
-                    if (++despike_strikes_ > 3)
+                    if (++despike_strikes_ > 1)
                         resetBuffer("teleport detected");
                     return;
                 }
@@ -210,10 +219,7 @@ private:
         // In Stage 3 use only the most recent samples (ball close to landing):
         // the early far-side samples skew the parabola and cause overshoot.
         // For S1/S2 use all buffered samples to capture the full launch arc.
-        static constexpr int S3_FIT_WINDOW = 15;
         size_t fit_start = 0;
-        if (ball_crossed_net_ && (int)buffer_.size() > S3_FIT_WINDOW)
-            fit_start = buffer_.size() - S3_FIT_WINDOW;
 
         std::vector<double> ts, xs, ys, zs;
         double t_off = buffer_[fit_start].t;
@@ -225,6 +231,13 @@ private:
 
         // ── Fit Z, check velocity direction ───────────────────────────────────
         double vz, z0; fitParabolic(ts, zs, 0.0, z0, vz);
+
+        // If the object is explicitly moving AWAY from the robot (positive Z velocity > 0.2 m/s),
+        // it is likely a paddle backswing or person moving. Trash the track completely.
+        if (vz > 1.5) { // Relaxed to prevent 3-frame noisy incoming hits from falsely triggering a wipe
+            resetBuffer("Object moving away (backswing)");
+            return;
+        }
         if (vz > -min_speed_) return;                // not coming toward MARTY
         if (std::abs(vz) > max_velocity_) return;    // noise
 
@@ -232,7 +245,7 @@ private:
         double dt_span = buffer_.back().t - buffer_.front().t;
         
         // If the overall track has drifted significantly backwards (away from robot), it's stereo noise.
-        if (z_drop < -0.15) {
+        if (z_drop < -0.25) { // Relaxed to 25cm to tolerate centroid wobble on heavily blurred smashes
             resetBuffer("noise: track moving backwards");
             return;
         }
@@ -350,7 +363,7 @@ private:
     // ── State ─────────────────────────────────────────────────────────────────
     int lookahead_ms_, max_samples_, s1_min_, s2_min_, s3_min_;
     double gravity_y_, table_y_, restitution_;
-    double min_speed_, net_margin_, max_track_z_, max_velocity_;
+    double min_speed_, net_margin_, max_track_z_, max_velocity_, max_y_;
     double t0_ = 0.0;
     int despike_strikes_ = 0;
 
