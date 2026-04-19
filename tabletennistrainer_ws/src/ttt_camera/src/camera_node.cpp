@@ -56,7 +56,7 @@ public:
         compressed_pub_ = this->create_publisher<sensor_msgs::msg::CompressedImage>(
             "/camera/" + camera_id_ + "/compressed", rclcpp::SensorDataQoS());
 
-        // 240 FPS = ~4.17ms per frame
+        // 240 FPS = 4.17ms per frame
         timer_ = this->create_wall_timer(
             std::chrono::microseconds(4167),
             std::bind(&CameraNode::captureFrame, this));
@@ -85,8 +85,7 @@ private:
         info_msg.header = msg->header;
         camera_info_pub_->publish(info_msg);
 
-        // THROTTLE GUI FEED: JPEG encoding 240 times a second starves the CPU!
-        // Only encode and send the GUI stream at 30 FPS (every 8th frame)
+        // Only encode and send the GUI stream at 30 FPS
         if (frame_count_ % 8 == 0) {
             auto comp_msg = sensor_msgs::msg::CompressedImage();
             comp_msg.header.stamp = this->now();

@@ -28,7 +28,7 @@ public:
         this->declare_parameter("frame_delay", 5);
         this->declare_parameter("max_aspect_ratio", 3.5);
 
-        // NEW: Static mode for calibration
+        // Static mode for calibration
         this->declare_parameter("static_mode", false);
 
         camera_id_ = this->get_parameter("camera_id").as_string();
@@ -174,7 +174,7 @@ private:
             cv::fillPoly(roi_mask_, std::vector<std::vector<cv::Point>>{extended_hull}, 255);
             
             // DILATE the ROI mask to expand the tracking zone OUTSIDE the white lines.
-            // This ensures we catch fast balls that fly slightly wide of the table edges!
+            // This ensures we catch fast balls that fly slightly wide of the table edges
             int k_size = 21;
             cv::Mat roi_dilate = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(k_size, k_size));
             cv::dilate(roi_mask_, roi_mask_, roi_dilate);
@@ -235,7 +235,7 @@ private:
             if (aspect > max_aspect_ratio_) continue;
 
             // Circularity check: Reject irregular, stringy, or crescent shapes (paddle edges)
-            // A perfect circle is 1.0. Motion-blurred balls are pill-shaped (~0.5 - 0.8).
+            // A perfect circle is 1.0. Motion-blurred balls are pill-shaped (0.5 - 0.8).
             // Paddle swings create long wavy lines/crescents that are usually < 0.3.
             double perimeter = cv::arcLength(contour, true);
             if (perimeter == 0) continue;

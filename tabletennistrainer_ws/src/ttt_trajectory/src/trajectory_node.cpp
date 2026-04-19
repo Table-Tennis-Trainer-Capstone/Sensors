@@ -9,9 +9,9 @@
 
 // ── Prediction stage ──────────────────────────────────────────────────────────
 // IDLE  : no active tracking
-// STAGE1: 2+ samples on opponent's side  → rough side/X direction, robot faces the right side
-// STAGE2: 4+ samples on opponent's side  → coarse landing estimate, robot moves to intercept zone
-// STAGE3: ball has crossed the net (Z<0) → final precise prediction, robot refines to return spot
+// STAGE1: 2+ samples on opponent's side  -> rough side/X direction, robot faces the right side
+// STAGE2: 4+ samples on opponent's side  -> coarse landing estimate, robot moves to intercept zone
+// STAGE3: ball has crossed the net (Z<0) -> final precise prediction, robot refines to return spot
 enum class PredStage : int { IDLE = 0, STAGE1 = 1, STAGE2 = 2, STAGE3 = 3 };
 
 struct Sample {
@@ -31,7 +31,7 @@ public:
         this->declare_parameter("net_margin_z",      -0.2);
         this->declare_parameter("max_track_z",        1.15);
         this->declare_parameter("max_velocity",       15.0);
-        this->declare_parameter("max_y",               0.35); // reject user's arm/racket (arm >> 0.35m)
+        this->declare_parameter("max_y",               0.35);
         // Per-stage minimum samples before publishing
         this->declare_parameter("stage1_min_samples",  2);
         this->declare_parameter("stage2_min_samples",  4);
@@ -69,7 +69,6 @@ public:
     }
 
 private:
-    // ── Helpers ───────────────────────────────────────────────────────────────
     void fitLinear(const std::vector<double>& t, const std::vector<double>& p,
                    double& p0, double& v) {
         int n = t.size();
@@ -147,7 +146,7 @@ private:
         phase_pub_->publish(m);
     }
 
-    // ── Per-stage smoothing alpha ─────────────────────────────────────────────
+    // Per-stage smoothing alpha
     // Stage 1: snap fast to first estimate (robot needs to start moving early)
     // Stage 2: track well but don't jitter
     // Stage 3: mostly stable (ball almost at bounce point, don't overshoot)
@@ -156,7 +155,7 @@ private:
     double landAlpha()  { return stage_==PredStage::STAGE1 ? 0.75
                                : stage_==PredStage::STAGE2 ? 0.40 : 0.20; }
 
-    // ── Main callback ─────────────────────────────────────────────────────────
+    // Main callback
     void cb(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
         double t_abs = rclcpp::Time(msg->header.stamp).seconds();
         double bx=msg->point.x, by=msg->point.y, bz=msg->point.z;
@@ -172,12 +171,12 @@ private:
             return;
         }
 
-        // Gap > 200 ms ⇒ new rally
+        // Gap > 200 ms = new rally
         if (!buffer_.empty() && (t_abs - buffer_.back().t_abs > 0.2))
             resetBuffer("tracking gap >200ms");
 
-        // Ball touched table surface ⇒ bounce, new arc.
-        // Only reset (and log) if we have an active track — stereo noise at Y≈0
+        // Ball touched table surface = bounce, new arc.
+        // Only reset (and log) if we have an active track, stereo noise around y = 0
         // when nothing is tracked would otherwise spam this message continuously.
         if (by < table_y_ + 0.02) {
             if (!buffer_.empty()) resetBuffer("bounce detected");
@@ -187,7 +186,7 @@ private:
         // Track whether ball originated on opponent's side
         if (bz > std::abs(net_margin_)) originated_across_net_ = true;
 
-        // Track net crossing (opponent's side → MARTY's side)
+        // Track net crossing (opponent's side to MARTY's side)
         if (!ball_crossed_net_ && originated_across_net_ && bz < 0.0) {
             ball_crossed_net_ = true;
             // Keep the EMA warm — Stage 3 refines from whatever Stage 2 settled on
@@ -215,7 +214,7 @@ private:
         buffer_.push_back({bx, by, bz, t_abs-t0_, t_abs});
         if ((int)buffer_.size() > max_samples_) buffer_.pop_front();
 
-        // ── Build fit vectors ─────────────────────────────────────────────────
+        // Build fit vectors
         // In Stage 3 use only the most recent samples (ball close to landing):
         // the early far-side samples skew the parabola and cause overshoot.
         // For S1/S2 use all buffered samples to capture the full launch arc.
@@ -229,12 +228,12 @@ private:
             xs.push_back(s.x); ys.push_back(s.y); zs.push_back(s.z);
         }
 
-        // ── Fit Z, check velocity direction ───────────────────────────────────
+        // Fit Z, check velocity direction
         double vz, z0; fitParabolic(ts, zs, 0.0, z0, vz);
 
         // If the object is explicitly moving AWAY from the robot (positive Z velocity > 0.2 m/s),
         // it is likely a paddle backswing or person moving. Trash the track completely.
-        if (vz > 1.5) { // Relaxed to prevent 3-frame noisy incoming hits from falsely triggering a wipe
+        if (vz > 1.5) {
             resetBuffer("Object moving away (backswing)");
             return;
         }
@@ -245,7 +244,7 @@ private:
         double dt_span = buffer_.back().t - buffer_.front().t;
         
         // If the overall track has drifted significantly backwards (away from robot), it's stereo noise.
-        if (z_drop < -0.25) { // Relaxed to 25cm to tolerate centroid wobble on heavily blurred smashes
+        if (z_drop < -0.25) {
             resetBuffer("noise: track moving backwards");
             return;
         }
@@ -254,7 +253,7 @@ private:
         if (dt_span > 0.0 && (z_drop/dt_span) < min_speed_) return;
         if (!originated_across_net_) return;
 
-        // ── Determine stage ───────────────────────────────────────────────────
+        // Determine stage
         int n = (int)buffer_.size();
         PredStage new_stage;
         if (ball_crossed_net_ && n >= s3_min_)
@@ -283,7 +282,7 @@ private:
         }
         if (stage_ == PredStage::STAGE3) s3_count_++;
 
-        // ── Fit X, Y ─────────────────────────────────────────────────────────
+        // Fit X, Y
         double vx, x0; fitLinear(ts, xs, x0, vx);
         double vy, y0; fitParabolic(ts, ys, gravity_y_, y0, vy);
         if (std::abs(vx) > max_velocity_ || std::abs(vy) > max_velocity_) return;
@@ -297,7 +296,7 @@ private:
         // Sanity bounds
         if (std::abs(land->x) > 1.5 || land->z < -1.5) return;
 
-        // ── Landing EMA ───────────────────────────────────────────────────────
+        // Landing EMA
         // Lock once we have a confident estimate so that late-trajectory samples
         // (near the net, where the rolling window loses the far-end launch angle)
         // cannot drift the prediction toward the net.
@@ -330,7 +329,7 @@ private:
         lmsg.point.x=sl_x_; lmsg.point.y=table_y_; lmsg.point.z=sl_z_;
         landing_pub_->publish(lmsg);
 
-        // ── Post-bounce intercept EMA ─────────────────────────────────────────
+        // Post-bounce intercept EMA
         double t_int = land->t_land + lookahead_ms_/1000.0;
         auto [px,py,pz,bounced] = predictWithBounce(x0,vx,y0,vy,z0,vz,t_now,t_int);
 
@@ -340,7 +339,7 @@ private:
             if (stage_ == PredStage::STAGE3) {
                 pred_locked_ = true;
                 RCLCPP_INFO(this->get_logger(),
-                    "🔒 STAGE3 prediction LOCKED → X:%+.3f Z:%.3f", sp_x_, sp_z_);
+                    "STAGE3 prediction LOCKED → X:%+.3f Z:%.3f", sp_x_, sp_z_);
             }
         } else if (!pred_locked_) {
             sp_x_ = pa*px + (1-pa)*sp_x_;
@@ -360,7 +359,7 @@ private:
             sl_x_, sl_z_, sp_x_, sp_z_, land->t_land*1000.0);
     }
 
-    // ── State ─────────────────────────────────────────────────────────────────
+    // State
     int lookahead_ms_, max_samples_, s1_min_, s2_min_, s3_min_;
     double gravity_y_, table_y_, restitution_;
     double min_speed_, net_margin_, max_track_z_, max_velocity_, max_y_;

@@ -151,7 +151,7 @@ private:
         // Center X (Table Center = 0)
         double out_x = raw_x - (baseline_ / 2.0);
 
-        // Center Y (Table Surface = 0). 
+        // Center Y (Table Surface = 0)
         // Camera Y is positive down. Subtracting from cam height makes 'up' positive.
         double cam_h = this->get_parameter("height_m").as_double();
         double out_y = cam_h - raw_y;

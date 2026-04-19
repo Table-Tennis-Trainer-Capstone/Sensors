@@ -75,7 +75,7 @@ private:
         } else if (data == "estop") {
             sendUdp("E\n");
         } else if (data.size() >= 2 && data[0] == 'M' && data[1] == ' ') {
-            // Instantly forward the exact M string from control_node to the STM32!
+            // forward M string from control_node to the STM32
             sendUdp(data + "\n");
             RCLCPP_INFO(this->get_logger(), "Sent: %s", data.c_str());
         } else if (data.size() >= 3 && data[0] == 'H' && data[1] == ' ') {
@@ -98,7 +98,7 @@ private:
             if (n > 0) {
                 buf[n] = '\0';
                 while (n > 0 && (buf[n - 1] == '\r' || buf[n - 1] == '\n')) buf[--n] = '\0';
-                // S1-S5 pos/tgt/err status lines → DEBUG (suppress terminal spam)
+                // S1-S5 pos/tgt/err status lines
                 if (buf[0] == 'S' && buf[1] >= '1' && buf[1] <= '9')
                     RCLCPP_DEBUG(this->get_logger(), "STM: %s", buf);
                 else

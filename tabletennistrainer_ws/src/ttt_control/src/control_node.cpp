@@ -17,9 +17,10 @@ public:
     ControlNode() : Node("ttt_control_node"), new_target_(false)
     {
         this->declare_parameter("update_rate_hz",  240.0);
-        this->declare_parameter("planning_time_s",  0.015);
+        this->declare_parameter("planning_time_s",  0.01);
         this->declare_parameter("speed_multiplier", 5.0);
         this->declare_parameter("intercept_x_offset", -0.25);
+        this->declare_parameter("return_delay_ms", 50);
 
         tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -50,6 +51,16 @@ public:
         move_group_->setMaxAccelerationScalingFactor(1.0);
         move_group_->setPoseReferenceFrame("root");
 
+        // Drive arm to extended home position on startup (STM32 H-command leaves arm collapsed)
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        move_group_->setNamedTarget("home");
+        moveit::planning_interface::MoveGroupInterface::Plan startup_plan;
+        if (move_group_->plan(startup_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+            send_goal_to_stm(startup_plan);
+            move_group_->execute(startup_plan);
+            RCLCPP_INFO(this->get_logger(), "Arm moved to home position");
+        }
+
         rclcpp::Rate rate(this->get_parameter("update_rate_hz").as_double());
         double speed_mult = this->get_parameter("speed_multiplier").as_double();
 
@@ -65,7 +76,7 @@ public:
             }
         };
 
-        // Extract final waypoint, apply STM32 offsets, and fire once!
+        // Extract final waypoint, apply STM32 offsets, and fire once
         auto send_goal_to_stm = [this](moveit::planning_interface::MoveGroupInterface::Plan& p) {
             if (p.trajectory_.joint_trajectory.points.empty()) return;
 
@@ -74,7 +85,7 @@ public:
             
             std::vector<std::string> order = {"BaseRotate_0", "UpperArmRotate_0", "ForeArmRotate_0", "WristRotate_0", "PaddleRotate_0"};
             
-            // STM32 hardware zero-offsets (+15 shoulder, +25 elbow)
+            // STM32 hardware zero-offsets
             float offsets[5] = {0.0f, 15.0f, 25.0f, 0.0f, 0.0f}; 
             float degs[5] = {0};
 
@@ -86,7 +97,7 @@ public:
                 }
             }
 
-            // Deduplication: Only fire a new UDP packet if the goal has changed by > 0.1 degrees
+            // Only fire a new UDP packet if the goal has changed by > 0.1 degrees
             bool significant_change = false;
             for (size_t i = 0; i < 5; i++) {
                 if (std::abs(degs[i] - last_degs_[i]) > 0.1f) {
@@ -126,7 +137,7 @@ public:
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 if (move_group_->plan(plan) == moveit::core::MoveItErrorCode::SUCCESS) {
                     overdrive_trajectory(plan);
-                    send_goal_to_stm(plan); // SEND HARDWARE PACKET ONCE
+                    send_goal_to_stm(plan);
                     move_group_->execute(plan);
                 }
                 rate.sleep();
@@ -140,22 +151,29 @@ public:
                     target = latest_target_;
                 }
 
-                
-
                 move_group_->setPositionTarget(target.position.x, target.position.y, target.position.z, "paddle_tcp");
                 move_group_->setGoalPositionTolerance(0.08);   
 
-                // ALL CONFLICTING CONSTRAINTS REMOVED!
                 move_group_->clearPathConstraints();
 
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 auto result = move_group_->plan(plan);
                 if (result == moveit::core::MoveItErrorCode::SUCCESS) {
                     overdrive_trajectory(plan);
-                    send_goal_to_stm(plan); // SEND HARDWARE PACKET ONCE
+                    send_goal_to_stm(plan);
                     move_group_->execute(plan);
                     
-                    // Auto-return removed. Arm stays exactly where it swings to!
+                    // Auto-return to ready state
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(this->get_parameter("return_delay_ms").as_int()));
+                    
+                    move_group_->setNamedTarget("ready");
+                    moveit::planning_interface::MoveGroupInterface::Plan return_plan;
+                    if (move_group_->plan(return_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+                        overdrive_trajectory(return_plan);
+                        send_goal_to_stm(return_plan);
+                        move_group_->execute(return_plan);
+                    }
                 } else {
                     RCLCPP_WARN(this->get_logger(), "IK Planning failed for Root Frame -> X: %.3f, Y: %.3f, Z: %.3f", target.position.x, target.position.y, target.position.z);
                 }
