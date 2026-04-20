@@ -178,7 +178,7 @@
         <axis xyz="0.93476 -0.35525 0" />
         <parent link="Shoulder" />
         <child link="UpperArm" />
-        <limit lower="-0.261799" upper="0.5236" effort="30.0" velocity="5" />
+        <limit lower="-0.261799" upper="2.705" effort="30.0" velocity="5" />
     </joint>
 
     <joint name="ForeArmRotate_0" type="revolute">
@@ -186,7 +186,7 @@
         <axis xyz="-0.93476 0.35525 0" /> 
         <parent link="UpperArm" />
         <child link="Forearm" />
-        <limit lower="-0.436332" upper="1.0472" effort="12.0" velocity="5" />
+        <limit lower="-0.436332" upper="2.181" effort="12.0" velocity="5" />
     </joint>
 
     <joint name="WristRotate_0" type="revolute">

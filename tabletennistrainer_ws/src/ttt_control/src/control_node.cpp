@@ -167,26 +167,28 @@ public:
                 move_group_->setGoalPositionTolerance(0.08);
                 move_group_->clearPathConstraints();
 
-                // FORCE PADDLE ORIENTATION
-                // Prevent the wrist from folding inward to the elbow, and keep the paddle flat.
-                /*
+                // FORCE PADDLE AND WRIST ORIENTATION
                 moveit_msgs::msg::Constraints constraints;
+
+                // B: Constrain wrist exactly between -pi (-3.14) and -pi/2 (-1.57)
                 moveit_msgs::msg::JointConstraint wrist_constraint;
                 wrist_constraint.joint_name = "WristRotate_0";
-                wrist_constraint.position = -1.0472;       // ~-60° — mid-range intercept position
-                wrist_constraint.tolerance_above = 1.0472; // Allow up to 0 (flat/ready)
-                wrist_constraint.tolerance_below = 1.0472; // Allow down to ~-120°
+                wrist_constraint.position = -2.35619;      // Center at -135 degrees
+                wrist_constraint.tolerance_above = 0.7854; // +45 deg (allows up to -90 deg / -pi/2)
+                wrist_constraint.tolerance_below = 0.7854; // -45 deg (allows down to -180 deg / -pi)
                 wrist_constraint.weight = 1.0;
+
+                // A: Lock paddle at 45 degrees
                 moveit_msgs::msg::JointConstraint paddle_constraint;
                 paddle_constraint.joint_name = "PaddleRotate_0";
-                paddle_constraint.position = 0.0;         // Keep paddle face square to the net
-                paddle_constraint.tolerance_above = 0.78; // Allow +/- 45 degrees of tilt/slice
-                paddle_constraint.tolerance_below = 0.78;
+                paddle_constraint.position = 0.7854;       // 45 degrees
+                paddle_constraint.tolerance_above = 0.7854; // +/- 45 deg to allow OMPL random sampling to succeed
+                paddle_constraint.tolerance_below = 0.7854;
                 paddle_constraint.weight = 1.0;
+
                 constraints.joint_constraints.push_back(wrist_constraint);
                 constraints.joint_constraints.push_back(paddle_constraint);
                 move_group_->setPathConstraints(constraints);
-                */
 
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 auto result = move_group_->plan(plan);

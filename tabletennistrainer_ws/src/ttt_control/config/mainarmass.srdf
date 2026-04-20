@@ -29,8 +29,8 @@
         <joint name="BaseRotate_0" value="0.0"/>
         <joint name="UpperArmRotate_0" value="-0.2618"/>
         <joint name="ForeArmRotate_0" value="-0.4363"/>
-        <joint name="WristRotate_0" value="0.0"/>
-        <joint name="PaddleRotate_0" value="0.0"/>
+        <joint name="WristRotate_0" value="-2.3562"/>
+        <joint name="PaddleRotate_0" value="0.7854"/>
     </group_state>
 
     <!-- Ready to intercept — arm extended forward, wrist 45° toward table -->
@@ -38,13 +38,9 @@
         <joint name="BaseRotate_0" value="0.0"/>
         <joint name="UpperArmRotate_0" value="0.0872665"/>
         <joint name="ForeArmRotate_0" value="0.610865"/>
-        <joint name="WristRotate_0" value="-1.5708"/>
-        <joint name="PaddleRotate_0" value="0.0"/>
+        <joint name="WristRotate_0" value="-2.3562"/>
+        <joint name="PaddleRotate_0" value="0.7854"/>
     </group_state>
-
-    <!-- Passively ignore wrist and paddle for IK testing -->
-    <passive_joint name="WristRotate_0" />
-    <passive_joint name="PaddleRotate_0" />
 
     <!--END EFFECTOR: Purpose: Represent information about an end effector.-->
     <end_effector name="PaddleEnd" parent_link="paddle_tcp" group="PaddleGroup" parent_group="armgroup"/>
