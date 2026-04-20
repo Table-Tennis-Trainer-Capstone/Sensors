@@ -159,6 +159,10 @@
             <geometry><sphere radius="0.01"/></geometry>
             <material name="black" />
         </visual>
+        <collision>
+            <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+            <geometry><sphere radius="0.01"/></geometry>
+        </collision>
     </link>
 
     <joint name="BaseRotate_0" type="revolute">
@@ -190,7 +194,7 @@
         <axis xyz="0.93476 -0.35525 0" />
         <parent link="Forearm" />
         <child link="Wrist" />
-        <limit lower="-3.1415" upper="-1.5708" effort="0.75" velocity="5" />
+        <limit lower="-3.1415" upper="3.14" effort="0.75" velocity="5" />
     </joint>
 
     <joint name="PaddleRotate_0" type="revolute">

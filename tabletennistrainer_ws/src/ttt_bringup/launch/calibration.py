@@ -14,16 +14,16 @@ PARAMS = {
 
     # ── Ball Detection (vision_node) ──────────────────────────────────────────
     'min_area':             1,   # Ignore tiny 4x5 pixel noise fragments
-    'max_area':             500,  # Prevents dropping the ball as it gets closer to the camera and grows in pixel size!
-    'motion_threshold':     10,   # prevents dropping the ball when it motion-blurs
-    'min_contrast':         43,   # Mandates the object be bright white/orange. Rejects dark matte paddles.
+    'max_area':             250,  # Tightened: rejects large background objects/paddles, but allows the ball near the net
+    'motion_threshold':     8,   # prevents dropping the ball when it motion-blurs
+    'min_contrast':         45,   # Mandates the object be bright white/orange. Rejects dark matte paddles.
     'dilate_iters':          2,   # merges broken paddle edge fragments into one giant blob > max_area
     'edge_margin':          10,   # Reclaims the outer edges of the camera lens
-    'kf_gate_px':          200.0, # Allows the KF to "catch" the ball during high-G impacts and direction changes
-    'kf_process_noise':     0.5,  # Makes the tracker trust new measurements instantly over its old velocity model
+    'kf_gate_px':          400.0, # Massive gate ensures the ball is never dropped on sudden fast hits
+    'kf_process_noise':     2.0,  # High process noise forces the tracker to instantly adopt new velocities
     'consistency_min':       1,
     'frame_delay':           5,   # Frames back for motion diff (5 = 21ms @ 240fps; less smear)
-    'max_aspect_ratio':      2.2, # Tightened: Rejects long sweeping arms and paddle edges
+    'max_aspect_ratio':      5.0, # Relaxed: Fast balls motion-blur into long streaks
     'table_roi_left':     [130, 213, 324, 137, 480, 198, 182, 346],
     'table_roi_right':    [253, 160, 454, 200, 418, 354, 124, 232],
 
@@ -66,9 +66,9 @@ PARAMS = {
 
     # ── Arm Control (control_node) ────────────────────────────────────────────
     'update_rate_hz':     240.0,   # How often the control loop checks for new ball targets
-    'planning_time_s':     0.015,   # Max time MoveIt spends finding a motion plan (keep short for real-time)
-    'return_delay_ms':     50,     # Time (ms) to hold the swing position before returning home
-    'speed_multiplier':    1.0,    # Overdrive scaling factor to bypass default URDF velocity limits
+    'planning_time_s':     0.05,    # Increased to give the KDL IK solver enough time to find constrained goal states
+    'return_delay_ms':     500,     # Time (ms) to hold the swing position before returning home
+    'speed_multiplier':    5.0,    # Overdrive scaling factor to bypass default URDF velocity limits
     'intercept_x_offset':  0.0,    # Pulls hit point toward robot (negative=closer). Keep at 0 to avoid IK unreachable errors.
 
 }

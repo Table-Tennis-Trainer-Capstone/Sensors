@@ -16,12 +16,11 @@ class ControlNode : public rclcpp::Node {
 public:
     ControlNode() : Node("ttt_control_node"), new_target_(false)
     {
-        this->declare_parameter("update_rate_hz",  240.0);
-        this->declare_parameter("planning_time_s",  0.1);
+        this->declare_parameter("update_rate_hz",  480.0);
+        this->declare_parameter("planning_time_s",  0.02);
         this->declare_parameter("speed_multiplier", 5.0);
-        this->declare_parameter("intercept_x_offset", 0.0); // Reset to 0.0 to prevent pulling targets into unreachable zones
-        this->declare_parameter("return_delay_ms", 50);
-        this->declare_parameter("wrist_angle_deg", 45.0);
+        this->declare_parameter("intercept_x_offset", 0.0);
+        this->declare_parameter("return_delay_ms", 500);
 
         tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -76,9 +75,8 @@ public:
             
             std::vector<std::string> order = {"BaseRotate_0", "UpperArmRotate_0", "ForeArmRotate_0", "WristRotate_0", "PaddleRotate_0"};
             
-            // STM32 hardware zero-offsets (wrist overridden by parameter, not FK)
-            float wrist_deg = (float)this->get_parameter("wrist_angle_deg").as_double();
-            float offsets[5] = {0.0f, 15.0f, 25.0f, 0.0f, 0.0f};
+            // STM32 hardware zero-offsets
+            float offsets[5] = {0.0f, 15.0f, 25.0f, 90.0f, 0.0f};
             float degs[5] = {0};
 
             for (size_t i = 0; i < 5; i++) {
@@ -86,6 +84,12 @@ public:
                 if (it != joint_names.end()) {
                     int idx = std::distance(joint_names.begin(), it);
                     degs[i] = (final_point.positions[idx] * (180.0 / M_PI)) + offsets[i];
+                    
+                    // Multiply the wrist motor angle by -4 before sending
+                    // (STM firmware clamps negatives to 0, so we must invert the axis!)
+                    if (order[i] == "WristRotate_0") {
+                        degs[i] *= -4.0f;
+                    }
                 }
             }
             // Only fire a new UDP packet if the goal has changed by > 0.1 degrees
@@ -166,9 +170,9 @@ public:
                 moveit_msgs::msg::Constraints constraints;
                 moveit_msgs::msg::JointConstraint wrist_constraint;
                 wrist_constraint.joint_name = "WristRotate_0";
-                wrist_constraint.position = -2.0;         // Bias toward pointing downward/outward
-                wrist_constraint.tolerance_above = 1.0;   // Max fold allowed is ~ -57 deg (-1.0 rad)
-                wrist_constraint.tolerance_below = 1.14;  // Max extension is ~ -180 deg (-3.14 rad)
+                wrist_constraint.position = -2.0944;       // Fixed at -120 degrees (STM receives -60 degs)
+                wrist_constraint.tolerance_above = 0.52;  // Relaxed (+30 deg) to allow straightening to -90 deg for far reaches
+                wrist_constraint.tolerance_below = 0.30;  // Relaxed (-17 deg) to allow pointing further down if needed
                 wrist_constraint.weight = 1.0;
                 moveit_msgs::msg::JointConstraint paddle_constraint;
                 paddle_constraint.joint_name = "PaddleRotate_0";

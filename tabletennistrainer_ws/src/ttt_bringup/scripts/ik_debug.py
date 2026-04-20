@@ -94,7 +94,7 @@ STM_CFG = [
     ('BaseRotate_0',     'M1 Base',        0.0,  1.0, -120.0, 120.0, '1:1'),
     ('UpperArmRotate_0', 'M2 Shoulder',   -15.0,  1.0,    0.0, 170.0, 'URDF -15 = STM 0'),
     ('ForeArmRotate_0',  'M3 Elbow',      -25.0,  1.0,    0.0, 150.0, 'URDF -25 = STM 0'),
-    ('WristRotate_0',    'M4 Wrist',       0.0,  1.0,  -90.0,  90.0, '1:1'),
+    ('WristRotate_0',    'M4 Wrist',      90.0,  2.0,  -90.0,  90.0, 'URDF -90 = STM 0'),
     ('PaddleRotate_0',   'M5 Paddle',      0.0,  1.0,  -90.0,  90.0, '1:1'),
 ]
 

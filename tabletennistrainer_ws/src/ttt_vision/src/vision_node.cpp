@@ -240,12 +240,12 @@ private:
             double perimeter = cv::arcLength(contour, true);
             if (perimeter == 0) continue;
             double circularity = (4.0 * CV_PI * actual_area) / (perimeter * perimeter);
-            if (circularity < 0.40) continue;
+            if (circularity < 0.25) continue; // Relaxed: High-speed blurred balls stretch out
 
             // Solidity check: Reject hollow/crescent shapes (like paddle motion edges)
             // A ball is a solid streak or circle, filling a high percentage of its bounding box.
             float fill_ratio = (float)(actual_area / bbox_area);
-            if (fill_ratio < 0.40f) continue; // Tightened: Ball streaks are solid (>0.4), paddle curves are hollow
+            if (fill_ratio < 0.30f) continue; // Relaxed: Allow for heavily blurred streaks
 
             cv::Point2f center(bbox.x + bbox.width / 2.0f, bbox.y + bbox.height / 2.0f);
             if (center.x < edge_margin_ || center.x > img.cols - edge_margin_) continue;

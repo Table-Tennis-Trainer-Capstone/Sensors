@@ -3,11 +3,16 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.parameter_descriptions import ParameterFile
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     calibration_dir = get_package_share_directory('ttt_calibration')
     moveit_config_dir = get_package_share_directory('ttt_control')
+    control_kinematics = ParameterFile(
+        os.path.join(moveit_config_dir, 'config', 'control_kinematics_params.yaml'),
+        allow_substs=False
+    )
 
     return LaunchDescription([
         # Launch calibration first
@@ -140,12 +145,15 @@ def generate_launch_description():
             package='ttt_control',
             executable='control_node',
             name='ttt_control_node',
-            parameters=[{
-                'update_rate_hz':  PARAMS['update_rate_hz'],
-                'planning_time_s': PARAMS['planning_time_s'],
-                'return_delay_ms': PARAMS['return_delay_ms'],
-                'speed_multiplier': PARAMS.get('speed_multiplier', 4.0),
-            }],
+            parameters=[
+                control_kinematics,
+                {
+                    'update_rate_hz':  PARAMS['update_rate_hz'],
+                    'planning_time_s': PARAMS['planning_time_s'],
+                    'return_delay_ms': PARAMS['return_delay_ms'],
+                    'speed_multiplier': PARAMS.get('speed_multiplier', 4.0),
+                }
+            ],
             output='screen'
         ),
 
