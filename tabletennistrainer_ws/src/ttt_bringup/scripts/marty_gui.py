@@ -369,9 +369,10 @@ _HTML_PAGE = """<!DOCTYPE html>
       var jns=['BaseRotate_0','UpperArmRotate_0','ForeArmRotate_0','WristRotate_0','PaddleRotate_0'];
       var jsh=['Base ','Shldr','Elbw ','Wrist','Paddl'];
       var jcl=['#00ff88','#00aaff','#ffaa00','#ff5555','#ff55ff'];
+      var offsets=[0.0, 15.0, 25.0, 90.0, 0.0];
       ctx.font='10px Consolas';
       for(var i=0;i<jns.length;i++){
-        var deg=((joints[jns[i]]||0)*180/Math.PI).toFixed(1);
+        var deg=((joints[jns[i]]||0)*180/Math.PI + offsets[i]).toFixed(1);
         ctx.fillStyle=jcl[i]; ctx.fillText(jsh[i]+': '+deg+'\u00b0',w-82,12+i*13);
       }
     }

@@ -17,10 +17,11 @@ public:
     ControlNode() : Node("ttt_control_node"), new_target_(false)
     {
         this->declare_parameter("update_rate_hz",  240.0);
-        this->declare_parameter("planning_time_s",  0.01);
+        this->declare_parameter("planning_time_s",  0.1);
         this->declare_parameter("speed_multiplier", 5.0);
-        this->declare_parameter("intercept_x_offset", -0.25);
+        this->declare_parameter("intercept_x_offset", 0.0); // Reset to 0.0 to prevent pulling targets into unreachable zones
         this->declare_parameter("return_delay_ms", 50);
+        this->declare_parameter("wrist_angle_deg", 45.0);
 
         tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -51,16 +52,6 @@ public:
         move_group_->setMaxAccelerationScalingFactor(1.0);
         move_group_->setPoseReferenceFrame("root");
 
-        // Drive arm to extended home position on startup (STM32 H-command leaves arm collapsed)
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        move_group_->setNamedTarget("home");
-        moveit::planning_interface::MoveGroupInterface::Plan startup_plan;
-        if (move_group_->plan(startup_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
-            send_goal_to_stm(startup_plan);
-            move_group_->execute(startup_plan);
-            RCLCPP_INFO(this->get_logger(), "Arm moved to home position");
-        }
-
         rclcpp::Rate rate(this->get_parameter("update_rate_hz").as_double());
         double speed_mult = this->get_parameter("speed_multiplier").as_double();
 
@@ -85,8 +76,9 @@ public:
             
             std::vector<std::string> order = {"BaseRotate_0", "UpperArmRotate_0", "ForeArmRotate_0", "WristRotate_0", "PaddleRotate_0"};
             
-            // STM32 hardware zero-offsets
-            float offsets[5] = {0.0f, 15.0f, 25.0f, 0.0f, 0.0f}; 
+            // STM32 hardware zero-offsets (wrist overridden by parameter, not FK)
+            float wrist_deg = (float)this->get_parameter("wrist_angle_deg").as_double();
+            float offsets[5] = {0.0f, 15.0f, 25.0f, 0.0f, 0.0f};
             float degs[5] = {0};
 
             for (size_t i = 0; i < 5; i++) {
@@ -96,7 +88,6 @@ public:
                     degs[i] = (final_point.positions[idx] * (180.0 / M_PI)) + offsets[i];
                 }
             }
-
             // Only fire a new UDP packet if the goal has changed by > 0.1 degrees
             bool significant_change = false;
             for (size_t i = 0; i < 5; i++) {
@@ -119,6 +110,16 @@ public:
             RCLCPP_INFO(this->get_logger(), "Fired Goal to STM32: %s", msg.data.c_str());
         };
 
+        // Drive arm to extended home position on startup (STM32 H-command leaves arm collapsed)
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        move_group_->setNamedTarget("home");
+        moveit::planning_interface::MoveGroupInterface::Plan startup_plan;
+        if (move_group_->plan(startup_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
+            send_goal_to_stm(startup_plan);
+            move_group_->execute(startup_plan);
+            RCLCPP_INFO(this->get_logger(), "Arm moved to home position");
+        }
+
         while (rclcpp::ok()) {
             std::string named_target;
             bool do_named = false;
@@ -132,7 +133,10 @@ public:
                 }
             }
             if (do_named) {
+                move_group_->setStartStateToCurrentState();
                 move_group_->setPlannerId("RRTConnect");
+                move_group_->setPlanningTime(0.5);
+                move_group_->clearPathConstraints();
                 move_group_->setNamedTarget(named_target);
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 if (move_group_->plan(plan) == moveit::core::MoveItErrorCode::SUCCESS) {
@@ -140,6 +144,7 @@ public:
                     send_goal_to_stm(plan);
                     move_group_->execute(plan);
                 }
+                move_group_->setPlanningTime(this->get_parameter("planning_time_s").as_double());
                 rate.sleep();
                 continue;
             }
@@ -151,10 +156,29 @@ public:
                     target = latest_target_;
                 }
 
+                move_group_->setStartStateToCurrentState();
                 move_group_->setPositionTarget(target.position.x, target.position.y, target.position.z, "paddle_tcp");
-                move_group_->setGoalPositionTolerance(0.08);   
-
+                move_group_->setGoalPositionTolerance(0.08);
                 move_group_->clearPathConstraints();
+
+                // FORCE PADDLE ORIENTATION
+                // Prevent the wrist from folding inward to the elbow, and keep the paddle flat.
+                moveit_msgs::msg::Constraints constraints;
+                moveit_msgs::msg::JointConstraint wrist_constraint;
+                wrist_constraint.joint_name = "WristRotate_0";
+                wrist_constraint.position = -2.0;         // Bias toward pointing downward/outward
+                wrist_constraint.tolerance_above = 1.0;   // Max fold allowed is ~ -57 deg (-1.0 rad)
+                wrist_constraint.tolerance_below = 1.14;  // Max extension is ~ -180 deg (-3.14 rad)
+                wrist_constraint.weight = 1.0;
+                moveit_msgs::msg::JointConstraint paddle_constraint;
+                paddle_constraint.joint_name = "PaddleRotate_0";
+                paddle_constraint.position = 0.0;         // Keep paddle face square to the net
+                paddle_constraint.tolerance_above = 0.78; // Allow +/- 45 degrees of tilt/slice
+                paddle_constraint.tolerance_below = 0.78;
+                paddle_constraint.weight = 1.0;
+                constraints.joint_constraints.push_back(wrist_constraint);
+                constraints.joint_constraints.push_back(paddle_constraint);
+                move_group_->setPathConstraints(constraints);
 
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 auto result = move_group_->plan(plan);
@@ -162,11 +186,14 @@ public:
                     overdrive_trajectory(plan);
                     send_goal_to_stm(plan);
                     move_group_->execute(plan);
-                    
+
                     // Auto-return to ready state
                     std::this_thread::sleep_for(
                         std::chrono::milliseconds(this->get_parameter("return_delay_ms").as_int()));
-                    
+
+                    move_group_->setStartStateToCurrentState();
+                    move_group_->setPlanningTime(0.5);
+                    move_group_->clearPathConstraints();
                     move_group_->setNamedTarget("ready");
                     moveit::planning_interface::MoveGroupInterface::Plan return_plan;
                     if (move_group_->plan(return_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
@@ -174,6 +201,7 @@ public:
                         send_goal_to_stm(return_plan);
                         move_group_->execute(return_plan);
                     }
+                    move_group_->setPlanningTime(this->get_parameter("planning_time_s").as_double());
                 } else {
                     RCLCPP_WARN(this->get_logger(), "IK Planning failed for Root Frame -> X: %.3f, Y: %.3f, Z: %.3f", target.position.x, target.position.y, target.position.z);
                 }

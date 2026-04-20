@@ -66,8 +66,9 @@ PARAMS = {
 
     # ── Arm Control (control_node) ────────────────────────────────────────────
     'update_rate_hz':     240.0,   # How often the control loop checks for new ball targets
-    'planning_time_s':     0.01,   # Max time MoveIt spends finding a motion plan (keep short for real-time)
+    'planning_time_s':     0.015,   # Max time MoveIt spends finding a motion plan (keep short for real-time)
     'return_delay_ms':     50,     # Time (ms) to hold the swing position before returning home
     'speed_multiplier':    1.0,    # Overdrive scaling factor to bypass default URDF velocity limits
+    'intercept_x_offset':  0.0,    # Pulls hit point toward robot (negative=closer). Keep at 0 to avoid IK unreachable errors.
 
 }
