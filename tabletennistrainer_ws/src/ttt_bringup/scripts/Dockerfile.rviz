@@ -1,0 +1,117 @@
+FROM osrf/ros:humble-desktop
+
+# MoveIt2, ros2_control, pick_ik, build tools, Mesa software GL,
+# and a virtual display + noVNC so RViz works on any host OS.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-humble-moveit \
+    ros-humble-pick-ik \
+    ros-humble-ros2-control \
+    ros-humble-ros2-controllers \
+    ros-humble-joint-state-publisher-gui \
+    python3-colcon-common-extensions \
+    python3-colcon-mixin \
+    libgl1-mesa-dri \
+    libgl1-mesa-glx \
+    libgles2-mesa \
+    mesa-utils \
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
+    && rm -rf /var/lib/apt/lists/*
+
+# Workspace layout:
+#   /ws/src     — host source mount (read-only, :ro)
+#   /ws/build   — named volume (colcon build cache)
+#   /ws/install — named volume (colcon install tree)
+RUN mkdir -p /ws/src /ws/build /ws/install
+
+EXPOSE 8080
+
+RUN cat > /entrypoint.sh << 'EOF'
+#!/bin/bash
+set -e
+
+source /opt/ros/humble/setup.bash
+
+# All ROS nodes run inside one container — loopback is sufficient.
+export ROS_LOCALHOST_ONLY=1
+export ROS_DOMAIN_ID=43
+
+# Virtual display — avoids all XQuartz / GLX forwarding issues on macOS and Windows.
+# Xvfb provides a full X server with software OpenGL inside the container.
+export DISPLAY=:99
+export LIBGL_ALWAYS_SOFTWARE=1
+export GALLIUM_DRIVER=llvmpipe
+export MESA_GL_VERSION_OVERRIDE=3.3
+export MESA_GLSL_VERSION_OVERRIDE=330
+
+echo ""
+echo "========================================"
+echo "  M.A.R.T.Y.  RViz  (MoveIt2)"
+echo "========================================"
+echo ""
+
+# Start virtual X server
+Xvfb :99 -screen 0 1440x900x24 +extension GLX +render -noreset &
+sleep 1
+
+# VNC server (no password, port 5900)
+x11vnc -display :99 -nopw -forever -rfbport 5900 -shared -quiet &
+sleep 1
+
+# noVNC web proxy — open http://localhost:8080/vnc.html in your browser
+websockify --web=/usr/share/novnc/ 8080 localhost:5900 &
+
+echo "  Browser UI ready at:  http://localhost:8080/vnc.html"
+echo ""
+
+cd /ws
+
+echo "[1/5] Building workspace (incremental)..."
+colcon build \
+    --packages-select ttt_msgs ttt_control \
+    --symlink-install \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    2>&1 | grep -E "(Summary|ERROR|error:|Finished|Starting)" || true
+
+source /ws/install/setup.bash
+echo "[1/5] Build done."
+
+echo "[2/5] Starting robot_state_publisher..."
+ros2 launch ttt_control rsp.launch.py &
+sleep 2
+
+# Publish the world frame that the SRDF virtual joint references.
+# world → table_center is identity (robot base sits at world origin in sim).
+ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id world --child-frame-id table_center &
+# Add the logical "table" frame for the control node's ball targets
+ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id world --child-frame-id table &
+
+echo "[3/5] Starting controllers (mock hardware)..."
+ros2 launch ttt_control controllers.launch.py &
+sleep 5
+
+echo "[4/5] Starting move_group..."
+ros2 launch ttt_control move_group.launch.py &
+sleep 4
+
+echo ""
+echo "  Opening RViz (Background)..."
+echo "  View at: http://localhost:8080/vnc.html"
+echo ""
+
+ros2 launch ttt_control moveit_rviz.launch.py &
+sleep 4
+
+echo "[5/5] Starting control_node in foreground terminal..."
+echo "  Press Ctrl+C to stop."
+echo "======================================================================="
+
+exec ros2 run ttt_control control_node --ros-args --params-file /ws/src/ttt_control/config/control_kinematics_params.yaml
+
+EOF
+RUN chmod +x /entrypoint.sh
+
+WORKDIR /ws
+ENTRYPOINT ["/entrypoint.sh"]

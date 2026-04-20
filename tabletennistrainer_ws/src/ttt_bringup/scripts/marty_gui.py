@@ -1275,7 +1275,7 @@ class SystemLauncher(threading.Thread):
             "ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 --qx 0 --qy 0 --qz 0 --qw 1 --frame-id world --child-frame-id table &\n"
             "sleep 5 && ros2 param set /move_group trajectory_execution.allowed_start_tolerance 0.0 && "
             "ros2 param set /move_group start_state_max_bounds_error 3.15 &\n"
-            "ros2 run ttt_control control_node &\n"
+            "ros2 run ttt_control control_node --ros-args --params-file /home/capstone-nano1/Sensors/tabletennistrainer_ws/src/ttt_control/config/control_kinematics_params.yaml &\n"
             "ros2 run ttt_hardware hardware_node --ros-args -p stm_ip:=192.168.1.100 -p stm_port:=7777 -p joint_topic:=/joint_states &\n"
 
             "wait\n"

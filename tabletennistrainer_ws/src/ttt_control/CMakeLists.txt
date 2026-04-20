@@ -26,4 +26,7 @@ install(DIRECTORY launch  DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY urdf    DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY meshes  DESTINATION share/${PROJECT_NAME})
 
+# MoveItConfigsBuilder scans the package share root for *.srdf
+install(FILES config/mainarmass.srdf DESTINATION share/${PROJECT_NAME})
+
 ament_package()

@@ -76,7 +76,7 @@ public:
             std::vector<std::string> order = {"BaseRotate_0", "UpperArmRotate_0", "ForeArmRotate_0", "WristRotate_0", "PaddleRotate_0"};
             
             // STM32 hardware zero-offsets
-            float offsets[5] = {0.0f, 15.0f, 25.0f, 90.0f, 0.0f};
+            float offsets[5] = {0.0f, 15.0f, 25.0f, 0.0f, 0.0f};
             float degs[5] = {0};
 
             for (size_t i = 0; i < 5; i++) {
@@ -115,7 +115,9 @@ public:
         };
 
         // Drive arm to extended home position on startup (STM32 H-command leaves arm collapsed)
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+        move_group_->setStartStateToCurrentState();
+        move_group_->clearPathConstraints();
         move_group_->setNamedTarget("home");
         moveit::planning_interface::MoveGroupInterface::Plan startup_plan;
         if (move_group_->plan(startup_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
@@ -167,12 +169,13 @@ public:
 
                 // FORCE PADDLE ORIENTATION
                 // Prevent the wrist from folding inward to the elbow, and keep the paddle flat.
+                /*
                 moveit_msgs::msg::Constraints constraints;
                 moveit_msgs::msg::JointConstraint wrist_constraint;
                 wrist_constraint.joint_name = "WristRotate_0";
-                wrist_constraint.position = -2.0944;       // Fixed at -120 degrees (STM receives -60 degs)
-                wrist_constraint.tolerance_above = 0.52;  // Relaxed (+30 deg) to allow straightening to -90 deg for far reaches
-                wrist_constraint.tolerance_below = 0.30;  // Relaxed (-17 deg) to allow pointing further down if needed
+                wrist_constraint.position = -1.0472;       // ~-60° — mid-range intercept position
+                wrist_constraint.tolerance_above = 1.0472; // Allow up to 0 (flat/ready)
+                wrist_constraint.tolerance_below = 1.0472; // Allow down to ~-120°
                 wrist_constraint.weight = 1.0;
                 moveit_msgs::msg::JointConstraint paddle_constraint;
                 paddle_constraint.joint_name = "PaddleRotate_0";
@@ -183,6 +186,7 @@ public:
                 constraints.joint_constraints.push_back(wrist_constraint);
                 constraints.joint_constraints.push_back(paddle_constraint);
                 move_group_->setPathConstraints(constraints);
+                */
 
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 auto result = move_group_->plan(plan);
@@ -228,9 +232,7 @@ private:
         in_base.header.stamp = msg->header.stamp;
         in_base.header.frame_id = "root";
 
-        // Transform from "table" frame to MoveIt "root" frame:
-        // Root X (Forward) = Table Z (Depth). Robot is at Z = -1.4732 relative to the net (Z=0).
-        // intercept_x_offset pulls the hit point toward the robot's end of the table (negative = closer).
+        // Transform from "table" frame to MoveIt "root" frame manually
         double x_offset = this->get_parameter("intercept_x_offset").as_double();
         in_base.point.x = msg->point.z + 1.4732 + x_offset;
         // Root Y (Left) = Table X.

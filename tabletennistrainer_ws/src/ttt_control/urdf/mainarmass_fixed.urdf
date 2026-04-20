@@ -190,11 +190,11 @@
     </joint>
 
     <joint name="WristRotate_0" type="revolute">
-        <origin xyz="-0.10957 -0.19888 -0.43388" rpy="-0.84990 0.27810 3.0151" />
+        <origin xyz="-0.10957 -0.19888 -0.43388" rpy="-2.48921 0.22754 2.49360" />
         <axis xyz="0.93476 -0.35525 0" />
         <parent link="Forearm" />
         <child link="Wrist" />
-        <limit lower="-3.1415" upper="3.14" effort="0.75" velocity="5" />
+        <limit lower="-3.14159" upper="0" effort="0.75" velocity="5" />
     </joint>
 
     <joint name="PaddleRotate_0" type="revolute">
