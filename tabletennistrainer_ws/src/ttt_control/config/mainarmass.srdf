@@ -18,8 +18,8 @@
     <!-- Physical H-command zero position (all STM servos at 0) -->
     <group_state name="stowed" group="armgroup">
         <joint name="BaseRotate_0" value="0.0"/>
-        <joint name="UpperArmRotate_0" value="-0.261799"/>
-        <joint name="ForeArmRotate_0" value="-0.436332"/>
+        <joint name="UpperArmRotate_0" value="-0.2617"/>
+        <joint name="ForeArmRotate_0" value="-0.4363"/>
         <joint name="WristRotate_0" value="0.0"/>
         <joint name="PaddleRotate_0" value="0.0"/>
     </group_state>
@@ -27,20 +27,23 @@
     <!-- Arm extended, paddle horizontal — startup position -->
     <group_state name="home" group="armgroup">
         <joint name="BaseRotate_0" value="0.0"/>
-        <joint name="UpperArmRotate_0" value="-0.2618"/>
+        <joint name="UpperArmRotate_0" value="-0.2617"/>
         <joint name="ForeArmRotate_0" value="-0.4363"/>
-        <joint name="WristRotate_0" value="-2.3562"/>
-        <joint name="PaddleRotate_0" value="0.7854"/>
+        <joint name="WristRotate_0" value="0.0"/>
+        <joint name="PaddleRotate_0" value="0.0"/>
     </group_state>
 
     <!-- Ready to intercept — arm extended forward, wrist 45° toward table -->
     <group_state name="ready" group="armgroup">
         <joint name="BaseRotate_0" value="0.0"/>
         <joint name="UpperArmRotate_0" value="0.0872665"/>
-        <joint name="ForeArmRotate_0" value="0.610865"/>
-        <joint name="WristRotate_0" value="-2.3562"/>
-        <joint name="PaddleRotate_0" value="0.7854"/>
+        <joint name="ForeArmRotate_0" value="0.436332"/>
+        <joint name="WristRotate_0" value="0.0"/>
+        <joint name="PaddleRotate_0" value="0.0"/>
     </group_state>
+
+    <passive_joint name="WristRotate_0"/>
+    <passive_joint name="PaddleRotate_0"/>
 
     <!--END EFFECTOR: Purpose: Represent information about an end effector.-->
     <end_effector name="PaddleEnd" parent_link="paddle_tcp" group="PaddleGroup" parent_group="armgroup"/>

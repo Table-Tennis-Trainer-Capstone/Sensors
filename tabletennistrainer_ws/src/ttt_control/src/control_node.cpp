@@ -73,40 +73,40 @@ public:
             auto final_point = p.trajectory_.joint_trajectory.points.back();
             auto joint_names = p.trajectory_.joint_trajectory.joint_names;
             
-            std::vector<std::string> order = {"BaseRotate_0", "UpperArmRotate_0", "ForeArmRotate_0", "WristRotate_0", "PaddleRotate_0"};
-            
-            // STM32 hardware zero-offsets
-            float offsets[5] = {0.0f, 15.0f, 25.0f, 0.0f, 0.0f};
-            float degs[5] = {0};
+            // Only 3 active joints now; wrist/paddle are passive (STM-controlled)
+            std::vector<std::string> order = {"BaseRotate_0", "UpperArmRotate_0", "ForeArmRotate_0"};
+            float offsets[3] = {0.0f, 15.0f, 25.0f};
+            float degs[3] = {0};
 
-            for (size_t i = 0; i < 5; i++) {
+            for (size_t i = 0; i < 3; i++) {
                 auto it = std::find(joint_names.begin(), joint_names.end(), order[i]);
                 if (it != joint_names.end()) {
                     int idx = std::distance(joint_names.begin(), it);
                     degs[i] = (final_point.positions[idx] * (180.0 / M_PI)) + offsets[i];
-                    
-                    // Multiply the wrist motor angle by -4 before sending
-                    // (STM firmware clamps negatives to 0, so we must invert the axis!)
-                    if (order[i] == "WristRotate_0") {
-                        degs[i] *= -4.0f;
-                    }
                 }
             }
+
+            // Wrist and paddle are fixed — STM32 holds these independently
+            float wrist_deg  = (-2.35619f * (180.0f / M_PI)) * -4.0f;  // ~540 deg in STM firmware units
+            float paddle_deg =   0.7854f  * (180.0f / M_PI);            // 45 deg
+
+            // Rate-limit: don't spam STM32 faster than every 100ms
+            auto now = this->get_clock()->now();
+            if ((now - last_stm_send_time_).seconds() < 0.1) return;
+
             // Only fire a new UDP packet if the goal has changed by > 0.1 degrees
             bool significant_change = false;
-            for (size_t i = 0; i < 5; i++) {
-                if (std::abs(degs[i] - last_degs_[i]) > 0.1f) {
-                    significant_change = true;
-                    break;
-                }
+            for (size_t i = 0; i < 3; i++) {
+                if (std::abs(degs[i] - last_degs_[i]) > 0.1f) { significant_change = true; break; }
             }
             if (!significant_change) return; // Skip redundant packets
             
-            for (size_t i = 0; i < 5; i++) last_degs_[i] = degs[i];
+            last_stm_send_time_ = now;
+            for (size_t i = 0; i < 3; i++) last_degs_[i] = degs[i];
 
             std::ostringstream ss;
             ss << "M " << std::fixed << std::setprecision(2) 
-               << degs[0] << " " << degs[1] << " " << degs[2] << " " << degs[3] << " " << degs[4];
+               << degs[0] << " " << degs[1] << " " << degs[2] << " " << wrist_deg << " " << paddle_deg;
                
             std_msgs::msg::String msg;
             msg.data = ss.str();
@@ -114,10 +114,11 @@ public:
             RCLCPP_INFO(this->get_logger(), "Fired Goal to STM32: %s", msg.data.c_str());
         };
 
-        // Drive arm to extended home position on startup (STM32 H-command leaves arm collapsed)
+        // Drive arm to extended home position on startup
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
         move_group_->setStartStateToCurrentState();
         move_group_->clearPathConstraints();
+        move_group_->setPlanningTime(1.0); // Give plenty of time for large startup plan
         move_group_->setNamedTarget("home");
         moveit::planning_interface::MoveGroupInterface::Plan startup_plan;
         if (move_group_->plan(startup_plan) == moveit::core::MoveItErrorCode::SUCCESS) {
@@ -125,6 +126,8 @@ public:
             move_group_->execute(startup_plan);
             RCLCPP_INFO(this->get_logger(), "Arm moved to home position");
         }
+        
+        move_group_->setPlanningTime(this->get_parameter("planning_time_s").as_double()); // Restore fast 0.02s tracking
 
         while (rclcpp::ok()) {
             std::string named_target;
@@ -141,7 +144,7 @@ public:
             if (do_named) {
                 move_group_->setStartStateToCurrentState();
                 move_group_->setPlannerId("RRTConnect");
-                move_group_->setPlanningTime(0.5);
+                move_group_->setPlanningTime(0.5); // Allow 0.5s for large named moves
                 move_group_->clearPathConstraints();
                 move_group_->setNamedTarget(named_target);
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
@@ -167,29 +170,6 @@ public:
                 move_group_->setGoalPositionTolerance(0.08);
                 move_group_->clearPathConstraints();
 
-                // FORCE PADDLE AND WRIST ORIENTATION
-                moveit_msgs::msg::Constraints constraints;
-
-                // B: Constrain wrist exactly between -pi (-3.14) and -pi/2 (-1.57)
-                moveit_msgs::msg::JointConstraint wrist_constraint;
-                wrist_constraint.joint_name = "WristRotate_0";
-                wrist_constraint.position = -2.35619;      // Center at -135 degrees
-                wrist_constraint.tolerance_above = 0.7854; // +45 deg (allows up to -90 deg / -pi/2)
-                wrist_constraint.tolerance_below = 0.7854; // -45 deg (allows down to -180 deg / -pi)
-                wrist_constraint.weight = 1.0;
-
-                // A: Lock paddle at 45 degrees
-                moveit_msgs::msg::JointConstraint paddle_constraint;
-                paddle_constraint.joint_name = "PaddleRotate_0";
-                paddle_constraint.position = 0.7854;       // 45 degrees
-                paddle_constraint.tolerance_above = 0.7854; // +/- 45 deg to allow OMPL random sampling to succeed
-                paddle_constraint.tolerance_below = 0.7854;
-                paddle_constraint.weight = 1.0;
-
-                constraints.joint_constraints.push_back(wrist_constraint);
-                constraints.joint_constraints.push_back(paddle_constraint);
-                move_group_->setPathConstraints(constraints);
-
                 moveit::planning_interface::MoveGroupInterface::Plan plan;
                 auto result = move_group_->plan(plan);
                 if (result == moveit::core::MoveItErrorCode::SUCCESS) {
@@ -202,7 +182,7 @@ public:
                         std::chrono::milliseconds(this->get_parameter("return_delay_ms").as_int()));
 
                     move_group_->setStartStateToCurrentState();
-                    move_group_->setPlanningTime(0.5);
+                    move_group_->setPlanningTime(0.5); // Give return movement 0.5s
                     move_group_->clearPathConstraints();
                     move_group_->setNamedTarget("ready");
                     moveit::planning_interface::MoveGroupInterface::Plan return_plan;
@@ -265,7 +245,8 @@ private:
     std::atomic<bool> new_target_;
     bool new_named_target_{false};
     std::string pending_named_target_;
-    float last_degs_[5] = {-999.0f, -999.0f, -999.0f, -999.0f, -999.0f};
+    float last_degs_[3] = {-999.0f, -999.0f, -999.0f};
+    rclcpp::Time last_stm_send_time_{0, 0, RCL_ROS_TIME};
 };
 
 int main(int argc, char ** argv)

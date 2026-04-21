@@ -264,14 +264,7 @@ _HTML_PAGE = """<!DOCTYPE html>
   </div>
 
   <div style="text-align:center;margin:12px auto;background:#111;padding:10px;border-radius:6px;border:1px solid #333;display:inline-block;position:relative;left:50%;transform:translateX(-50%);">
-    <span style="color:#aaa;font-size:12px;margin-right:10px;font-weight:bold;">MOVE TO POINT:</span>
-    <span style="color:#777;font-size:11px;">
-      X:<input id="arm-x" type="number" value="0.0" step="0.05" style="width:55px;background:#222;color:#00ffcc;border:1px solid #444;font-size:12px;margin:0 4px;" title="Lateral (m, 0=center, +=right)">
-      Y:<input id="arm-y" type="number" value="0.30" step="0.05" style="width:55px;background:#222;color:#00ffcc;border:1px solid #444;font-size:12px;margin:0 4px;" title="Height above table (m)">
-      Z:<input id="arm-z" type="number" value="-1.05" step="0.05" style="width:60px;background:#222;color:#00ffcc;border:1px solid #444;font-size:12px;margin:0 4px;" title="Depth from net (m, negative=robot side)">
-    </span>
-    <button class="btn btn-test" onclick="sendArmPoint()" style="margin-left:6px;">MOVE</button>
-    <button class="btn" style="background:#1a3a1a;border:1px solid #0a0;color:#0f0;margin-left:12px;" onclick="fetch('/api/arm_ready',{method:'POST'})">READY</button>
+    <button class="btn" style="background:#1a3a1a;border:1px solid #0a0;color:#0f0;" onclick="fetch('/api/arm_ready',{method:'POST'})">READY</button>
     <button class="btn" style="background:#1a3a1a;border:1px solid #0a0;color:#0f0;margin-left:4px;" onclick="fetch('/api/arm_home',{method:'POST'})">HOME</button>
     <button class="btn" id="stm-home-btn" style="background:#1a1a3a;border:1px solid #55f;color:#88f;margin-left:12px;" onclick="sendStmHome()">STM HOME</button>
   </div>
@@ -769,14 +762,6 @@ _HTML_PAGE = """<!DOCTYPE html>
         }).catch(()=>{ st.style.color='#f55'; st.textContent='\u2717 error'; });
     }
 
-function sendArmPoint(){
-  var x = parseFloat(document.getElementById('arm-x').value);
-  var y = parseFloat(document.getElementById('arm-y').value);
-  var z = parseFloat(document.getElementById('arm-z').value);
-  fetch('/api/test_arm', {method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({x: x, y: y, z: z})});
-}
-
 function sendStmHome(){
   var btn = document.getElementById('stm-home-btn');
   btn.textContent = 'HOMING...'; btn.style.color = '#ff0';
@@ -1165,18 +1150,6 @@ class WebStreamer:
                 })
             return Response(json.dumps({'ok': ok, 'msg': '; '.join(msgs) or 'ok'}), mimetype='application/json')
 
-        @self._app.route('/api/test_arm', methods=['POST'])
-        def api_test_arm():
-            data = request.get_json()
-            msg = PointStamped()
-            if hasattr(self, 'ros_worker'): msg.header.stamp = self.ros_worker.n.get_clock().now().to_msg()
-            msg.header.frame_id = 'table'
-            msg.point.x = float(data.get('x', 0.0))
-            msg.point.y = float(data.get('y', 0.30))   # 30cm above table
-            msg.point.z = float(data.get('z', -1.05))  # 1.05m from net (robot's side, mid-workspace)
-            if hasattr(self, 'ros_worker'): self.ros_worker.test_pub.publish(msg)
-            return Response(json.dumps({'ok': True}), mimetype='application/json')
-
         @self._app.route('/api/arm_ready', methods=['POST'])
         def api_arm_ready():
             if hasattr(self, 'ros_worker'):
@@ -1322,7 +1295,6 @@ class ROSWorker(threading.Thread):
             lambda m: (self.dets.update({'right': m}),
                        self.ws._stats.update({'det_r_x': m.x if m.x >= 0 else None, 'det_r_y': m.y if m.x >= 0 else None}),
                        self._rec('/ball_detection/right', 'BallDetection', {'x': round(m.x, 1), 'y': round(m.y, 1), 'radius': round(getattr(m, 'radius', 0.0), 1), 'area': int((getattr(m, 'radius', 0.0)*2)**2), 'conf': round(getattr(m, 'confidence', 0.0), 3)})), q)
-        self.test_pub = self.n.create_publisher(PointStamped, '/ball_trajectory/predicted', 10)
         self.arm_cmd_pub = self.n.create_publisher(String, '/arm_named_target', 10)
         self.stm_cmd_pub = self.n.create_publisher(String, '/stm_cmd', 10)
 
