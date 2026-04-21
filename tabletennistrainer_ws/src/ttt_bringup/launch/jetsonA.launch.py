@@ -135,6 +135,7 @@ def generate_launch_description():
                 'min_incoming_speed': PARAMS.get('min_incoming_speed', 0.5),
                 'net_margin_z': PARAMS.get('net_margin_z', -0.2),
                 'max_track_z': PARAMS.get('max_track_z', 1.15),
+                'max_y': PARAMS.get('max_y', 1.5),
                 'max_velocity': PARAMS.get('max_velocity', 25.0),
             }],
             output='screen'

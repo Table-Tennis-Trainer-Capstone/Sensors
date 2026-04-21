@@ -1197,7 +1197,7 @@ class SystemLauncher(threading.Thread):
             "export RCUTILS_CONSOLE_OUTPUT_FORMAT=\"[{severity}] [{name}]: {message}\"\n"
             "source /opt/ros/humble/setup.bash && source /home/capstone-nano2/Sensors/tabletennistrainer_ws/install/setup.bash\n"
             "ros2 launch ttt_bringup camera_right.launch.py &\n"
-            f"ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_right -p camera_id:=right -p min_area:={CAL['min_area']} -p max_area:={CAL['max_area']} -p motion_threshold:={CAL['motion_threshold']} -p min_contrast:={CAL.get('min_contrast', 100)} -p dilate_iters:={CAL['dilate_iters']} -p edge_margin:={CAL['edge_margin']} -p kf_gate_px:={CAL.get('kf_gate_px', 250.0)} -p kf_process_noise:={CAL.get('kf_process_noise', 0.05)} {_roi_b} &\n"
+            f"ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_right -p camera_id:=right -p min_area:={CAL['min_area']} -p max_area:={CAL['max_area']} -p motion_threshold:={CAL['motion_threshold']} -p min_contrast:={CAL.get('min_contrast', 100)} -p dilate_iters:={CAL['dilate_iters']} -p edge_margin:={CAL['edge_margin']} -p kf_gate_px:={CAL.get('kf_gate_px', 250.0)} -p kf_process_noise:={CAL.get('kf_process_noise', 0.05)} -p max_aspect_ratio:={CAL.get('max_aspect_ratio', 8.0)} {_roi_b} &\n"
             "wait"
         )
         with open('/tmp/lb.sh', 'w') as f: f.write(cmd_b)
@@ -1218,7 +1218,7 @@ class SystemLauncher(threading.Thread):
             "ros2 launch ttt_bringup camera_left.launch.py &\n"
             
             # Vision Node
-            f"ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_left -p camera_id:=left -p min_area:={CAL['min_area']} -p max_area:={CAL['max_area']} -p motion_threshold:={CAL['motion_threshold']} -p min_contrast:={CAL.get('min_contrast', 100)} -p dilate_iters:={CAL['dilate_iters']} -p edge_margin:={CAL['edge_margin']} -p kf_gate_px:={CAL.get('kf_gate_px', 250.0)} -p kf_process_noise:={CAL.get('kf_process_noise', 0.05)} {_roi_a} &\n"
+            f"ros2 run ttt_vision vision_node --ros-args -r __node:=ball_detector_left -p camera_id:=left -p min_area:={CAL['min_area']} -p max_area:={CAL['max_area']} -p motion_threshold:={CAL['motion_threshold']} -p min_contrast:={CAL.get('min_contrast', 100)} -p dilate_iters:={CAL['dilate_iters']} -p edge_margin:={CAL['edge_margin']} -p kf_gate_px:={CAL.get('kf_gate_px', 250.0)} -p kf_process_noise:={CAL.get('kf_process_noise', 0.05)} -p max_aspect_ratio:={CAL.get('max_aspect_ratio', 8.0)} {_roi_a} &\n"
             
             # Stereo Node (With all alignment parameters)
             f"ros2 run ttt_stereo stereo_node --ros-args -p fx:={CAL['fx']} -p fy:={CAL['fy']} -p cx:={CAL['cx']} -p cy:={CAL['cy']} -p baseline_m:={CAL.get('baseline_m', 1.525)} -p max_sync_age_ms:={CAL['max_sync_age_ms']} "
@@ -1234,6 +1234,7 @@ class SystemLauncher(threading.Thread):
             f"-p min_incoming_speed:={CAL.get('min_incoming_speed', 0.5)} "
             f"-p net_margin_z:={CAL.get('net_margin_z', -0.2)} "
             f"-p max_track_z:={CAL.get('max_track_z', 1.15)} "
+            f"-p max_y:={CAL.get('max_y', 1.5)} "
             f"-p max_velocity:={CAL.get('max_velocity', 25.0)} &\n"
             
             # TF Tree, MoveIt, Control, and Hardware Stack
@@ -1496,8 +1497,8 @@ class ROSWorker(threading.Thread):
             self.ws.push_frame(frame, side)
 
 def _cleanup():
-    subprocess.run("pkill -f 'ros2 run'", shell=True, stderr=subprocess.DEVNULL)
-    subprocess.run("ssh capstone-nano1@192.168.1.10 \"pkill -f 'ros2 run'\"", shell=True, stderr=subprocess.DEVNULL)
+    subprocess.run("pkill -f 'ros2 run'; pkill -f 'ros2 launch'; pkill -f 'control_node'; pkill -f 'trajectory_node'; pkill -f 'vision_node'; pkill -f 'stereo_node'; pkill -f 'hardware_node'", shell=True, stderr=subprocess.DEVNULL)
+    subprocess.run("ssh capstone-nano1@192.168.1.10 \"pkill -f 'ros2 run'; pkill -f 'ros2 launch'; pkill -f 'control_node'; pkill -f 'trajectory_node'; pkill -f 'vision_node'; pkill -f 'stereo_node'; pkill -f 'hardware_node'\"", shell=True, stderr=subprocess.DEVNULL)
 
 if __name__ == "__main__":
     import atexit; atexit.register(_cleanup)

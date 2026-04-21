@@ -106,25 +106,16 @@ private:
     struct PredPt { double x,y,z; bool bounced; };
 
     PredPt predictWithBounce(double x0,double vx,double y0,double vy,
-                             double z0,double vz,double t_now,double t_pred) {
-        double a=0.5*gravity_y_, b=-vy, c=table_y_-y0;
-        double disc=b*b-4*a*c;
-        if(disc>=0){
-            double sq=std::sqrt(disc);
-            double t1=(-b-sq)/(2*a), t2=(-b+sq)/(2*a);
-            double tb=-1;
-            if(t1>t_now&&t1<t_pred) tb=t1;
-            if(t2>t_now&&t2<t_pred&&(tb<0||t2<tb)) tb=t2;
-            if(tb>0){
-                double bvy=-(vy-gravity_y_*tb)*restitution_;
-                double dt=t_pred-tb;
-                return {x0+vx*t_pred,
-                        table_y_+bvy*dt-0.5*gravity_y_*dt*dt,
-                        z0+vz*t_pred, true};
-            }
+                             double z0,double vz,double tb,double t_pred) {
+        if (t_pred > tb) {
+            double bvy = -(vy - gravity_y_ * tb) * restitution_;
+            double dt = t_pred - tb;
+            return {x0 + vx * t_pred,
+                    table_y_ + bvy * dt - 0.5 * gravity_y_ * dt * dt,
+                    z0 + vz * t_pred, true};
         }
-        return {x0+vx*t_pred, y0+vy*t_pred-0.5*gravity_y_*t_pred*t_pred,
-                z0+vz*t_pred, false};
+        return {x0 + vx * t_pred, y0 + vy * t_pred - 0.5 * gravity_y_ * t_pred * t_pred,
+                z0 + vz * t_pred, false};
     }
 
     void resetBuffer(const char* reason) {
@@ -331,7 +322,7 @@ private:
 
         // Post-bounce intercept EMA
         double t_int = land->t_land + lookahead_ms_/1000.0;
-        auto [px,py,pz,bounced] = predictWithBounce(x0,vx,y0,vy,z0,vz,t_now,t_int);
+        auto [px,py,pz,bounced] = predictWithBounce(x0,vx,y0,vy,z0,vz,land->t_land,t_int);
 
         double pa = predAlpha();
         if (!has_pred_) {
